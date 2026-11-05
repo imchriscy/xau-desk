@@ -3,105 +3,96 @@
 [![Release](https://img.shields.io/github/v/release/imchriscy/xau-desk?label=release)](https://github.com/imchriscy/xau-desk/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**Windows 黄金（XAUUSD）操盘台** — Electron 图表 + 本地 MT5 Python 网关，面向 scalping / 日内：**硬风控**、图形下单、近机位延迟。
+---
 
-> 当前版本 **v0.2.0** · 变更见 [CHANGELOG.md](CHANGELOG.md)
+## English
+
+**XauDesk** is a Windows trading desk for **XAUUSD** on **MetaTrader 5**: chart-native UI, a **local Python gateway**, and a **hard risk engine** that sits *outside* your strategy—where discipline actually belongs.
+
+You already understand systematic trading; the failure mode is **risk discipline**, not another indicator. XauDesk enforces caps, session rules, streak halts, and exposure budgets **before** orders reach the broker. Execution stays on **localhost** (`127.0.0.1`) so latency is measurable and minimal: **MT5 API time (mt5_ms)** and **HTTP round-trip (RTT)** are live on the toolbar—same-machine loopback typically keeps the full path **within ~20ms** under normal conditions.
+
+**Built for:** discretionary and systematic gold traders on Windows who want **professional-grade control** without giving up MT5.
+
+### Technical stack
+
+| Layer | Implementation |
+|--------|----------------|
+| **Desktop** | Electron · single-window workflow · no browser chrome |
+| **Chart** | Lightweight Charts · MT5-native bar sync · multi-TF · volume · drawings · indicators |
+| **Gateway** | Python stdlib HTTP server · official `MetaTrader5` package · `pythonw` background process |
+| **Risk** | Per-trade & daily loss caps (USD / %) · configurable streak tiers · virtual equity · margin budget · max slots · mandatory SL · append-only audit with hash chain |
+| **Execution** | ARM gate · market & pending orders · drag SL/TP on chart · APP magic isolation |
+
+### Latency model
+
+- **`mt5_ms`** — time for the gateway to call MT5 (often sub-ms to a few ms on one PC).
+- **`RTT`** — browser ↔ local gateway (loopback).
+- Not a claim about broker WAN; a claim about **your** execution stack being tight and **observable**.
+
+### Quick start
+
+1. Install and log in to **MT5**; enable **XAUUSD** (or set `MT5_SYMBOL`).
+2. Turn on **Algo Trading** in MT5.
+3. `pip install MetaTrader5` (Python bitness must match MT5).
+4. `npm install` in this repo.
+5. Run **`install-desktop.vbs`** once → launch **XauDesk** from the desktop shortcut (starts gateway `:5191` + UI `:5190` + Electron).
+
+Risk design: **[docs/RISK_DESIGN_AND_PHILOSOPHY.md](docs/RISK_DESIGN_AND_PHILOSOPHY.md)** · Changes: **[CHANGELOG.md](CHANGELOG.md)**
+
+### License
+
+[MIT](LICENSE) — tooling only, not investment advice. You are responsible for live trading outcomes.
 
 ---
 
-## 一句话
+## 中文
 
-在 **本机已登录 MetaTrader 5** 的前提下，用一块专为 **XAUUSD** 做的 Windows 终端：**风控机**管纪律，**下单路径**走 localhost，MT5 API 调用延迟通常在 **亚毫秒～数 ms**；界面顶栏可观测 **MT5 ms / HTTP RTT**，同机环回下 **端到端常可压在 ~20ms 内**（视机器与券商而定，非对赌商 WAN 延迟承诺）。
+**XauDesk（黄金操盘台）** 是面向 **Windows + MetaTrader 5 + XAUUSD** 的专业级交易终端：图表、**本地网关**、**外部硬风控** 一体。
 
----
+目标用户很清晰：**懂系统交易、有执行力，但风控纪律最难靠自觉**——连损加仓、盘中改规则、无 SL 手痒，都是实盘杀手。XauDesk 把规则做成系统：**单笔 / 日窗 / 连损分档 / 头寸与保证金** 在下单链路前拦截，而不是事后写总结。执行走 **本机环回**，延迟可量化：顶栏 **MT5 ms** 与 **RTT** 实时可见；同机环境下，**端到端常可压在 ~20ms 量级**（取决于机器与券商，指的是你的本地栈，不是吹 WAN）。
 
-## 亮点（宣传 / Release Notes 可用）
+**适合：** 黄金日内 / 短线 / 系统化交易者，要 **MT5 实盘通道 + 机构化纪律**，而不是再多一个指标面板。
 
-| 维度 | 说明 |
+### 技术架构
+
+| 模块 | 说明 |
 |------|------|
-| **平台** | Windows · MT5 官方 Python API · 默认 **XAUUSD**（符号可配置） |
-| **延迟** | 本地网关 `127.0.0.1:5191`；`GET /api/ping` 返回 **mt5_ms**（Python→MT5）与 **server_ms**（HTTP 环回） |
-| **图表** | Lightweight Charts · 多周期 · 成交量 · 画线 · 指标 |
-| **下单** | ARM 确认 · 市价 / 挂单 · 图上拖 SL/TP · 网关直送 MT5 |
-| **风控** | 单笔 / 日累计 / 连损分档暂停 · 演算本金 · 头寸与保证金预算 · 强制 SL · 审计哈希链 |
-| **形态** | Electron 单窗口 · 网关 **pythonw** 无黑窗 · 一键桌面图标 |
+| **桌面** | Electron 单窗口 · 无浏览器地址栏 · 一键桌面启动 |
+| **图表** | Lightweight Charts · 与 MT5 周期一致 · 成交量 · 画线 · 指标 |
+| **网关** | Python 标准库 HTTP · 官方 MT5 API · 后台无控制台 |
+| **风控** | 单笔 & 日损（USD / 净值%）· 可配置连损档位与暂停 · 演算本金 · 保证金预算 · 最大头寸 · 强制止损 · 审计日志哈希链 |
+| **下单** | ARM 确认 · 市价 / 挂单 · 图上拖动 SL/TP · Magic 隔离 |
+
+### 延迟说明
+
+- **MT5 ms**：网关调用 MT5 的耗时（同机常见亚毫秒～数 ms）。
+- **RTT**：界面到本地网关的 HTTP 往返。
+- 强调 **可观测、可优化** 的本地执行链，而非对券商线路做营销式承诺。
+
+### 快速开始
+
+1. 安装并登录 **MT5**；启用 **XAUUSD**（或通过 `MT5_SYMBOL` 指定券商符号）。
+2. MT5 打开 **算法交易**。
+3. `pip install MetaTrader5`（Python 与 MT5 **位数一致**）。
+4. 本目录 `npm install`。
+5. 首次双击 **`install-desktop.vbs`**，之后从桌面 **XauDesk** 启动（网关 5191 + 前端 5190 + Electron）。
+
+风控设计：[docs/RISK_DESIGN_AND_PHILOSOPHY.md](docs/RISK_DESIGN_AND_PHILOSOPHY.md) · 版本记录：[CHANGELOG.md](CHANGELOG.md)
+
+### 许可
+
+[MIT](LICENSE) · 仅为交易工具，不构成投资建议；实盘后果自负。
 
 ---
 
-## 快速开始
+## API (reference)
 
-1. 安装 **MetaTrader 5** 并登录；报价里启用 **XAUUSD**（或券商等价符号）。
-2. Python（与 MT5 **同位数**）：`pip install MetaTrader5`
-3. Node.js LTS；在本目录：`npm install`
-4. MT5 中开启 **算法交易（AutoTrading）**。
-5. 首次：双击 **`install-desktop.vbs`** → 桌面 **XauDesk** 图标。
-6. 日常：先 MT5 登录，再双击图标（自动重启网关 + 前端 + Electron）。
+| Endpoint | Description |
+|----------|-------------|
+| `GET /api/mt5/status` | Terminal / account |
+| `GET /api/ping` | `mt5_ms`, `server_ms` |
+| `GET /api/quote` | Bid / Ask |
+| `GET /api/bars?timeframe=15m` | OHLCV bars |
+| `GET/POST /api/risk/*` | Risk status & configuration |
 
-- 网关：`http://127.0.0.1:5191`
-- 前端：`http://127.0.0.1:5190`（Vite 代理 `/api` → 5191）
-
-日志：`logs/gateway.log`、`logs/vite.err.log` · 停服务：`stop-app.vbs`
-
-### 环境变量（可选）
-
-| 变量 | 说明 |
-|------|------|
-| `MT5_TERMINAL_PATH` | MT5 可执行路径 |
-| `MT5_SYMBOL` | 默认自动探测；券商不同可设 `XAUUSDm` 等 |
-
----
-
-## 风控
-
-设计说明：**[docs/RISK_DESIGN_AND_PHILOSOPHY.md](docs/RISK_DESIGN_AND_PHILOSOPHY.md)**
-
-改后端后执行 **`restart-backend.cmd`** 或重启桌面图标。网关版本见 `GET /api/risk/status` 或 `serve_mt5.py` 内 `GATEWAY_VERSION`。
-
----
-
-## 开源与隐私
-
-**切勿提交**真实账户数据。以下文件已在 `.gitignore` 中忽略，仅保留本地：
-
-- `backend/risk_state.json`
-- `backend/risk_events.jsonl`
-- `backend/trade_journal.json`
-
-首次克隆可用示例空状态：`backend/risk_state.json.example`。详见 **[docs/OPEN_SOURCE.md](docs/OPEN_SOURCE.md)**。
-
----
-
-## API（节选）
-
-| 路径 | 说明 |
-|------|------|
-| `GET /api/mt5/status` | 终端 / 账户 |
-| `GET /api/ping` | `mt5_ms` + `server_ms` |
-| `GET /api/quote` | Bid/Ask |
-| `GET /api/bars?timeframe=15m` | K 线 |
-| `GET/POST /api/risk/*` | 风控状态与配置 |
-
----
-
-## 目录
-
-```
-win-trade-terminal/
-  backend/serve_mt5.py      # HTTP 网关
-  backend/risk_engine.py    # 风控引擎
-  electron/main.cjs         # 桌面壳
-  src/                      # React + 图表
-```
-
----
-
-## 打包（规划）
-
-- MT5 **无法内置**，须用户自行安装并登录。
-- 可将网关 PyInstaller 化 + Electron 安装包，用户只看到一个 **XauDesk** 窗口。
-
----
-
-## License
-
-[MIT](LICENSE) · 本项目为工具软件，**不构成投资建议**；实盘风险自负。
+Optional env: `MT5_TERMINAL_PATH`, `MT5_SYMBOL`.

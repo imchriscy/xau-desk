@@ -1,0 +1,16 @@
+node_modules/
+backend/.venv/
+__pycache__/
+*.pyc
+dist/
+logs/
+nul
+*.local
+
+# 本地运行时（含 MT5 登录号、净值、成交）— 勿提交
+backend/risk_state.json
+backend/risk_events.jsonl
+backend/trade_journal.json
+*.tsbuildinfo
+.env
+.env.*

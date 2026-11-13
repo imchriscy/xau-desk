@@ -1,0 +1,39 @@
+{
+  "mode": "tmgm_demo_rebate_drill",
+  "symbol_env": "MT5_SYMBOL",
+  "lot_per_trade": 0.1,
+  "max_net_lots": 0.2,
+  "tp_usd_per_oz": 4.0,
+  "sl_usd_per_oz": 4.0,
+  "max_new_entries_per_bjt_day": 50,
+  "limit_ttl_seconds": 30,
+  "quote_side": "passive",
+  "inventory_skew_usd_per_oz": 0.5,
+  "stack": "5m30m1h",
+  "long_thr": 10.0,
+  "short_thr": 10.0,
+  "smooth_min": 3,
+  "seed": 42,
+  "economics": {
+    "broker": "TMGM_demo",
+    "spread_observed_points": 32,
+    "commission_per_lot_side_usd": 0.0,
+    "rebate_per_lot_side_usd_live": 0.0,
+    "rebate_per_lot_side_usd_projected_yingshi": 22.0
+  },
+  "quote_refresh": {
+    "max_quote_drift_usd": 0.5,
+    "on_drift": "reprice_once",
+    "comment": "bid 急跌/ask 急涨时按新 BBO 重挂一次，否则记 drift_skip"
+  },
+  "journal": {
+    "dir": "logs/rebate_drill",
+    "jsonl_name": "events.jsonl"
+  },
+  "runner": {
+    "poll_seconds": 15,
+    "dry_run_default": true,
+    "require_demo_account": true,
+    "magic": 8805190
+  }
+}

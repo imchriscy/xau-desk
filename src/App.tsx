@@ -9,7 +9,11 @@ import PositionsPanel from "./components/PositionsPanel";
 import SettingsModal from "./components/SettingsModal";
 import RiskHud from "./components/RiskHud";
 import RiskPanel from "./components/RiskPanel";
+import DailyHardRiskPanel from "./components/DailyHardRiskPanel";
+import StreakOrdinanceModal from "./components/StreakOrdinanceModal";
+import { useStreakOrdinanceAlert } from "./hooks/useStreakOrdinanceAlert";
 import ChartToolbars from "./components/ChartToolbars";
+import BidAskTickChartModal from "./components/BidAskTickChartModal";
 import ChartIndicatorLegend from "./components/ChartIndicatorLegend";
 import { buildIndicatorRenderPlans } from "./chartIndicators";
 import { loadStoredChartUi, saveStoredChartUi } from "./chartIndicatorStorage";
@@ -162,6 +166,7 @@ export default function App() {
 
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [riskOpen, setRiskOpen] = useState(false);
+  const [dailyHardRiskOpen, setDailyHardRiskOpen] = useState(false);
   const [drawTool, setDrawTool] = useState<DrawToolKind>(null);
   const storedChartUi = useMemo(() => loadStoredChartUi(), []);
   const [chartDrawings, setChartDrawings] = useState<ChartDrawing[]>(() => storedChartUi.drawings);
@@ -185,6 +190,14 @@ export default function App() {
   const [posSyncTick, setPosSyncTick] = useState(0);
 
   const chartRef = useRef<TradingChartHandle>(null);
+  const pendingTfScrollRef = useRef<Timeframe | null>(null);
+  const [tickSpreadOpen, setTickSpreadOpen] = useState(false);
+
+  const onTimeframe = useCallback((tf: Timeframe) => {
+    if (tf === timeframe) return;
+    pendingTfScrollRef.current = tf;
+    setTimeframe(tf);
+  }, [timeframe]);
 
   const formRef = useRef(form);
 
@@ -204,6 +217,7 @@ export default function App() {
 
   const { account, error: accountError, reload: reloadAccount } = useMt5Account(dataEpoch + accountEpoch);
   const { status: riskStatus } = useRiskStatus(market.connected, account?.login);
+  const streakOrdinanceAlert = useStreakOrdinanceAlert(riskStatus);
 
   const dailyPnlUsd = useMemo(() => {
     if (!account) return null;
@@ -329,6 +343,23 @@ export default function App() {
     queueMicrotask(() => chartRef.current?.resetVisibleRange());
   }, [reloadBars]);
 
+  const lastCandleTime = candles.length > 0 ? candles[candles.length - 1].time : 0;
+
+  useEffect(() => {
+    if (pendingTfScrollRef.current !== timeframe) return;
+    if (market.loadingTf || candles.length === 0) return;
+    pendingTfScrollRef.current = null;
+    const scroll = () => chartRef.current?.scrollToLatest();
+    const raf1 = requestAnimationFrame(() => {
+      requestAnimationFrame(scroll);
+    });
+    const t = window.setTimeout(scroll, 80);
+    return () => {
+      cancelAnimationFrame(raf1);
+      window.clearTimeout(t);
+    };
+  }, [timeframe, market.loadingTf, candles.length, lastCandleTime]);
+
   const prevClose = candles.length > 2 ? candles[candles.length - 2].close : lastPrice;
 
   const chg = lastPrice - prevClose;
@@ -344,19 +375,26 @@ export default function App() {
     });
   }, []);
 
+  // 仅在市场事件（成交/改单/平仓）时默认选中最新单；轮询刷新持仓列表不得抢用户当前选中
   useEffect(() => {
     if (orderSyncTick === 0) return;
     const list = pendingRef.current;
     if (list.length === 0) return;
+    const sel = selectedIdRef.current;
+    if (sel && list.some((p) => p.id === sel)) return;
     const latest = [...list].sort((a, b) => b.createdAt - a.createdAt)[0];
     if (latest) setSelectedId(latest.id);
   }, [orderSyncTick]);
 
   useEffect(() => {
-    if (!executeOnMt5 || posSyncTick === 0 || mt5Positions.length === 0) return;
-    const latest = [...mt5Positions].sort((a, b) => b.openTime - a.openTime)[0];
+    if (!executeOnMt5 || posSyncTick === 0) return;
+    const list = positionsRef.current;
+    if (list.length === 0) return;
+    const sel = selectedIdRef.current;
+    if (sel && list.some((p) => p.id === sel)) return;
+    const latest = [...list].sort((a, b) => b.openTime - a.openTime)[0];
     if (latest) setSelectedId(latest.id);
-  }, [posSyncTick, executeOnMt5, mt5Positions]);
+  }, [posSyncTick, executeOnMt5]);
 
   const submitPendingAtPrice = useCallback(
     async (mode: PendingOrderMode, price: number) => {
@@ -1136,6 +1174,14 @@ export default function App() {
             {executeOnMt5 ? "MT5 直连" : "MT5 未连接"}
           </span>
 
+          <button
+            type="button"
+            className={`tool-btn ${dailyHardRiskOpen ? "tool-btn-accent" : ""}`}
+            onClick={() => setDailyHardRiskOpen((o) => !o)}
+            title="侧栏展开十条硬风控箴言"
+          >
+            每日必读
+          </button>
           <button type="button" className="tool-btn" onClick={() => setRiskOpen(true)}>
             风控
           </button>
@@ -1157,7 +1203,7 @@ export default function App() {
       <ChartToolbars
         timeframe={timeframe}
         timeframes={TIMEFRAMES}
-        onTimeframe={setTimeframe}
+        onTimeframe={onTimeframe}
         onResetView={() => chartRef.current?.resetVisibleRange()}
         onRefresh={refreshMock}
         drawTool={drawTool}
@@ -1169,6 +1215,14 @@ export default function App() {
         selectedDrawingId={selectedDrawingId}
         onDeleteSelectedDrawing={deleteSelectedDrawing}
         onScrollToLatest={() => chartRef.current?.scrollToLatest()}
+        onOpenTickSpread={() => setTickSpreadOpen(true)}
+        tickSpreadActive={tickSpreadOpen}
+      />
+
+      <BidAskTickChartModal
+        open={tickSpreadOpen}
+        symbol={market.symbol}
+        onClose={() => setTickSpreadOpen(false)}
       />
 
       <SettingsModal
@@ -1184,6 +1238,14 @@ export default function App() {
       />
 
       <RiskPanel open={riskOpen} onClose={() => setRiskOpen(false)} account={account} />
+
+      <StreakOrdinanceModal
+        open={streakOrdinanceAlert.open}
+        tier={streakOrdinanceAlert.tier}
+        consecutiveLosses={streakOrdinanceAlert.consecutiveLosses}
+        pauseMinutes={streakOrdinanceAlert.pauseMinutes}
+        onClose={streakOrdinanceAlert.dismiss}
+      />
 
       <div className="main-grid">
 
@@ -1318,6 +1380,11 @@ export default function App() {
             <h2>风控 · ARM</h2>
 
             <RiskHud status={riskStatus} onOpenRisk={() => setRiskOpen(true)} />
+
+            <DailyHardRiskPanel
+              expanded={dailyHardRiskOpen}
+              onToggle={() => setDailyHardRiskOpen((o) => !o)}
+            />
 
             <div className="arm-row">
 

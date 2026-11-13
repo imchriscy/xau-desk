@@ -84,6 +84,7 @@ export function useMt5Market(timeframe: Timeframe, refreshKey: number) {
   }, []);
 
   useEffect(() => {
+    setState((s) => (s.loadingTf ? s : { ...s, loadingTf: true }));
     void (async () => {
       try {
         const st = await fetchMt5Status();

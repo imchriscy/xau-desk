@@ -43,3 +43,12 @@ cp backend/risk_state.json.example backend/risk_state.json
 - ❌ 避免「对券商 0.1ms」「全球最低延迟」等无法证实的绝对表述
 
 顶栏 **MT5 ms / RTT ms** 即为可复现的延迟指标。
+
+## macOS / MQL5 分支文档
+
+| 文档 | 用途 |
+|------|------|
+| [MAC_VERSION.md](./MAC_VERSION.md) | Mac 克隆与外出操盘拓扑 |
+| [MQL5_RISK_GATEWAY.md](./MQL5_RISK_GATEWAY.md) | EA 与 Python 网关 API 对齐规格 |
+
+Windows 用户无需阅读；Mac 重构者从 **MAC_VERSION.md** 入门。

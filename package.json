@@ -1,7 +1,7 @@
 {
   "name": "xau-desk",
   "private": false,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
   "description": "XauDesk · Windows MT5 XAUUSD terminal — chart, risk engine, low-latency local gateway",
   "license": "MIT",

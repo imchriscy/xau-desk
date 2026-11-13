@@ -629,6 +629,237 @@ select {
   text-align: left;
 }
 
+.tool-btn-accent {
+  border-color: rgba(248, 113, 113, 0.55);
+  color: #fca5a5;
+  background: rgba(248, 81, 73, 0.12);
+}
+
+.daily-hard-risk-panel {
+  margin: 0.5rem 0 0.55rem;
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  border-radius: 8px;
+  background: rgba(127, 29, 29, 0.15);
+  overflow: hidden;
+}
+
+.daily-hard-risk-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.5rem 0.55rem;
+  border: 0;
+  background: transparent;
+  color: #fecaca;
+  cursor: pointer;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-align: left;
+}
+
+.daily-hard-risk-toggle-label {
+  letter-spacing: 0.04em;
+}
+
+.daily-hard-risk-toggle-meta {
+  font-size: 0.65rem;
+  font-weight: 500;
+  color: var(--text-muted);
+}
+
+.daily-hard-risk-body {
+  padding: 0 0.45rem 0.55rem;
+  max-height: min(42vh, 320px);
+  overflow-y: auto;
+}
+
+.daily-hard-risk-hint {
+  margin: 0 0.35rem 0.45rem;
+  font-size: 0.62rem;
+  color: var(--text-muted);
+  line-height: 1.35;
+}
+
+.daily-hard-risk-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.hard-risk-mini-card {
+  border-radius: 6px;
+  border: 1px solid rgba(248, 113, 113, 0.28);
+  background: rgba(15, 18, 22, 0.65);
+}
+
+.hard-risk-mini-card.flat {
+  border-color: rgba(248, 113, 113, 0.35);
+}
+
+.hard-risk-mini-summary {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.25rem 0.35rem;
+  padding: 0.4rem 0.45rem;
+  cursor: pointer;
+  list-style: none;
+}
+
+.hard-risk-mini-summary::-webkit-details-marker {
+  display: none;
+}
+
+.hard-risk-mini-summary.static {
+  cursor: default;
+}
+
+.hard-risk-mini-idx {
+  font-size: 0.62rem;
+  font-weight: 800;
+  color: #f87171;
+  min-width: 0.9rem;
+}
+
+.hard-sin-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.15rem;
+  height: 1.15rem;
+  padding: 0 0.25rem;
+  border-radius: 4px;
+  font-size: 0.62rem;
+  font-weight: 800;
+}
+
+.hard-sin-badge.sin-tan {
+  background: rgba(210, 153, 34, 0.25);
+  color: #e3b341;
+}
+
+.hard-sin-badge.sin-chen {
+  background: rgba(248, 81, 73, 0.22);
+  color: #ff7b72;
+}
+
+.hard-sin-badge.sin-chi {
+  background: rgba(163, 113, 247, 0.22);
+  color: #d2a8ff;
+}
+
+.hard-sin-badge.sin-man {
+  background: rgba(88, 166, 255, 0.2);
+  color: #79c0ff;
+}
+
+.hard-sin-badge.sin-yi {
+  background: rgba(139, 148, 158, 0.25);
+  color: #c9d1d9;
+}
+
+.hard-seven-badge {
+  font-size: 0.58rem;
+  padding: 0.08rem 0.32rem;
+  border-radius: 3px;
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--text-muted);
+}
+
+.hard-poem-text {
+  flex: 1;
+  min-width: 4.5rem;
+  font-family: "KaiTi", "STKaiti", "楷体", serif;
+  font-size: 0.95rem;
+  font-weight: 700;
+  letter-spacing: 0.28em;
+  color: #fff;
+}
+
+.hard-risk-chevron {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+}
+
+.hard-risk-mini-card[open] .hard-risk-chevron {
+  transform: rotate(90deg);
+}
+
+.hard-risk-mini-detail {
+  margin: 0;
+  padding: 0 0.45rem 0.5rem;
+  font-size: 0.65rem;
+  line-height: 1.45;
+  color: #c9d1d9;
+  border-top: 1px dashed rgba(248, 113, 113, 0.2);
+}
+
+.hard-risk-mini-detail.open {
+  border-top: none;
+  padding-top: 0.15rem;
+}
+
+.hard-risk-mini-detail strong {
+  display: block;
+  color: #ffaba8;
+  margin-bottom: 0.2rem;
+  font-size: 0.68rem;
+}
+
+.hard-risk-mini-warn {
+  display: block;
+  margin-top: 0.35rem;
+  color: #f87171;
+  font-size: 0.62rem;
+}
+
+.modal-panel-streak-ordinance {
+  width: min(480px, 100%);
+  max-height: min(90vh, 640px);
+  overflow-y: auto;
+  border: 1px solid rgba(248, 113, 113, 0.45);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.45);
+}
+
+.streak-ordinance-lead {
+  margin: 0 0 0.35rem;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: #fecaca;
+}
+
+.streak-ordinance-lead.sub {
+  font-size: 0.75rem;
+  font-weight: 400;
+  color: var(--text-muted);
+  margin-bottom: 0.75rem;
+}
+
+.streak-ordinance-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+
+.streak-ordinance-footer {
+  margin: 0.65rem 0 0;
+  font-size: 0.72rem;
+  color: var(--text-muted);
+}
+
+.streak-ordinance-actions {
+  margin-top: 0.75rem;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.streak-ordinance-dismiss {
+  border-color: rgba(248, 113, 113, 0.45);
+  color: #fecaca;
+}
+
 .help-fold-body {
   margin-top: 0.35rem;
   padding: 0.45rem 0.55rem;
@@ -1506,6 +1737,67 @@ select {
 
 .modal-panel.modal-panel-settings {
   width: min(440px, calc(100vw - 2rem));
+}
+
+.modal-panel.modal-panel-tick-spread {
+  width: min(720px, calc(100vw - 2rem));
+  max-height: min(520px, 90vh);
+  display: flex;
+  flex-direction: column;
+}
+
+.tick-spread-backdrop {
+  z-index: 95;
+}
+
+.tick-spread-symbol {
+  color: var(--gold);
+  font-weight: 600;
+}
+
+.tick-spread-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1rem;
+  font-size: 0.72rem;
+  margin-bottom: 0.5rem;
+}
+
+.tick-legend.ask {
+  color: var(--short);
+}
+
+.tick-legend.bid {
+  color: var(--accent);
+}
+
+.tick-legend.spread {
+  color: var(--text);
+}
+
+.tick-legend.muted {
+  color: var(--text-muted);
+}
+
+.tick-spread-error {
+  margin: 0 0 0.35rem;
+  font-size: 0.7rem;
+  color: #fca5a5;
+}
+
+.tick-spread-chart-host {
+  flex: 1 1 auto;
+  min-height: 320px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+  background: var(--bg-elevated);
+}
+
+.tool-btn.tool-btn-compact.active {
+  border-color: var(--accent);
+  color: #fff;
+  background: rgba(41, 98, 255, 0.22);
 }
 
 .modal-head {

@@ -891,8 +891,13 @@ const TradingChart = forwardRef<TradingChartHandle, Props>(function TradingChart
         barSpacing: timeframe === "1m" ? 5 : 7,
         secondsVisible: sec < 3600,
       });
-      if (tfChanged || !prevRange) {
+      const snapLatest = () => {
         ts.setVisibleLogicalRange(latestVisibleLogicalRange(clean.length, timeframe));
+      };
+      // 切换周期：必须对齐最新（勿沿用上一周期的 logical range）
+      // 新周期 K 线到达时 tfChanged 已为 false，用 !sameAnchor 兜底
+      if (tfChanged || !sameAnchor || !prevRange) {
+        snapLatest();
       } else {
         const added =
           prevLenRef.current > 0 && clean.length > prevLenRef.current && prevFirstTimeRef.current === clean[0].time

@@ -39,6 +39,12 @@ You already understand systematic trading; the failure mode is **risk discipline
 
 Risk design: **[docs/RISK_DESIGN_AND_PHILOSOPHY.md](docs/RISK_DESIGN_AND_PHILOSOPHY.md)** · Changes: **[CHANGELOG.md](CHANGELOG.md)**
 
+### macOS (portable execution via MQL5)
+
+The **supported production build is Windows** (Python gateway + local MT5). For Mac, use the same repo as the UI/risk spec and implement execution in **MQL5**:
+
+- **[docs/MAC_VERSION.md](docs/MAC_VERSION.md)** · **[docs/MQL5_RISK_GATEWAY.md](docs/MQL5_RISK_GATEWAY.md)** · **`mql5/`**
+
 ### License
 
 [MIT](LICENSE) — tooling only, not investment advice. You are responsible for live trading outcomes.
@@ -78,6 +84,24 @@ Risk design: **[docs/RISK_DESIGN_AND_PHILOSOPHY.md](docs/RISK_DESIGN_AND_PHILOSO
 5. 首次双击 **`install-desktop.vbs`**，之后从桌面 **XauDesk** 启动（网关 5191 + 前端 5190 + Electron）。
 
 风控设计：[docs/RISK_DESIGN_AND_PHILOSOPHY.md](docs/RISK_DESIGN_AND_PHILOSOPHY.md) · 版本记录：[CHANGELOG.md](CHANGELOG.md)
+
+### macOS（外出 Mac 重构路线）
+
+**默认发行版仍是 Windows 完整实盘栈。** Mac 无法用官方 Python `MetaTrader5` 包 attach 本机终端；若要在 Mac 上操盘，请阅读：
+
+- **[docs/MAC_VERSION.md](docs/MAC_VERSION.md)** — 克隆仓库、拓扑选型、与 Windows 版差异  
+- **[docs/MQL5_RISK_GATEWAY.md](docs/MQL5_RISK_GATEWAY.md)** — 将 `risk_engine` 迁至 MQL5 EA 的端点与清单  
+- **`mql5/`** — EA 代码目录（规划占位，欢迎 PR）
+
+在 Mac 上：`git clone https://github.com/imchriscy/xau-desk.git` → Cursor 打开 → 按上述文档演进 **MQL5 Risk Gateway**。
+
+### 桌面图标打不开？
+
+1. 看 **`logs/vite.err.log`**：若出现「未找到 npm」，说明快捷方式启动时 **未加载系统 PATH**（已在新版 `scripts/_root.ps1` 中修复：从注册表刷新 PATH）。
+2. 需已安装 **Node.js LTS**（安装时勾选 *Add to PATH*），并在本目录执行过 **`npm install`**。
+3. 网关：确认 **Python + `pip install MetaTrader5`**，MT5 已登录；查看 **`logs/gateway.err.log`**。
+4. 仍失败时先用 **`run-dev.cmd`**（会弹出窗口便于看报错），确认 `http://127.0.0.1:5190` 能开，再双击桌面 **XauDesk**。
+5. 若 Electron 已在运行，再次点图标只会 **聚焦旧窗口**（单实例）；任务管理器结束 `electron.exe` 后重试。
 
 ### 许可
 

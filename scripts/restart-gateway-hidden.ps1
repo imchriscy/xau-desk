@@ -22,5 +22,5 @@ Wait-HttpOk "http://127.0.0.1:5191/api/version" 45 | Out-Null
 try {
     $v = Invoke-RestMethod -Uri "http://127.0.0.1:5191/api/version" -TimeoutSec 5
     $line = "$(Get-Date -Format 'yyyy-MM-dd HH:mm:ss') gateway restarted version=$($v.version)"
-    Add-Content -Path $out -Value $line -Encoding utf8
+    try { Add-Content -Path $out -Value $line -Encoding utf8 -ErrorAction Stop } catch { }
 } catch { }

@@ -106,6 +106,27 @@ main ─────────────────────────
 
 ---
 
+## 与 Cursor / Agent 协作（推荐说法）
+
+让助手 **按「可测一小步」提交并推送**，比攒一大堆再 `git push` 更安全、也更好回滚。
+
+| 你这样说 | 助手应做 |
+|----------|----------|
+| 「只改了 EA，编译过了」 | `git add mql5/ gateway-mac/mt5-payload/`（若同步了 ex5）→ 单独 `fix(bridge): …` commit |
+| 「只修了 BTC 盈亏 / 顶栏」 | 只 `git add` 涉及的 `src/` 文件 → `fix(ui): …` |
+| 「今天收工，同步 GitHub」 | `git status` 确认无 `release/`、`ipc/tools/` → `git push origin feature/mt5-exec-mac` |
+| 「准备合 main 的 UI」 | 列出仅 `src/` 的 commit，cherry-pick 或单独 PR，**不带** `gateway-mac/` |
+
+**助手默认约定（本仓库 Mac 轨）**
+
+1. **分支**：日常只在 `feature/mt5-exec-mac`（或你指定的 `mac/*`）上 commit；不直接改 `main` 除非明确要求。
+2. **Commit 粒度**：一个用户可感知行为或一个可编译单元（EA / gateway / 一块 UI）一单；文档可同单或 `docs:` 单列。
+3. **禁止入仓**：`release/`、`ipc/tools/`、Wine 缓存、本机桥路径与含账号的状态文件；提交前必须 `git status` 目视。
+4. **推送**：完成里程碑或你要求「上传 GitHub」时 push 功能分支；**不** force push `main`；合 `main` 用 PR + 你确认。
+5. **验证口令**：动 `mql5/` → 提醒 `compile-mt5-bridge-mac.sh`；动前端 → `npm run build`；发版再谈 tag `mac-v0.3.x-bridge.0xx`。
+
+---
+
 ## 相关文档
 
 - [MAC_EASY_CONNECT.md](MAC_EASY_CONNECT.md) · [MAC_LATENCY_SEGMENTS.md](MAC_LATENCY_SEGMENTS.md) · [MAC_OPTIMIZATION_ROADMAP.md](MAC_OPTIMIZATION_ROADMAP.md)  

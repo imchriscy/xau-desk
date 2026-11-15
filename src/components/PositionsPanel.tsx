@@ -1,10 +1,12 @@
-import { unrealizedPnl } from "../orderLogic";
+import { positionMarkPnl } from "../instrumentPnl";
+import type { TradeInstrumentId } from "../instruments";
 import type { PendingOrder, Position } from "../types";
 
 interface Props {
   positions: Position[];
   pending: PendingOrder[];
   lastPrice: number;
+  instrumentId: TradeInstrumentId;
   selectedId: string | null;
   onSelect: (id: string | null) => void;
   onClosePosition: (id: string) => void;
@@ -25,9 +27,10 @@ export default function PositionsPanel({
   onClosePosition,
   onCancelPending,
   tradingLocked,
+  instrumentId,
 }: Props) {
   const totalPnl = positions.reduce(
-    (s, p) => s + unrealizedPnl(p.side, p.lots, p.openPrice, lastPrice),
+    (s, p) => s + positionMarkPnl(p, lastPrice, instrumentId),
     0,
   );
 
@@ -51,7 +54,7 @@ export default function PositionsPanel({
 
       <ul className="trade-list">
         {positions.map((p) => {
-          const pnl = unrealizedPnl(p.side, p.lots, p.openPrice, lastPrice);
+          const pnl = positionMarkPnl(p, lastPrice, instrumentId);
           const active = selectedId === p.id;
           return (
             <li key={p.id} className={`trade-row position ${active ? "selected" : ""}`}>

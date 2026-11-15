@@ -14,3 +14,14 @@ backend/trade_journal.json
 *.tsbuildinfo
 .env
 .env.*
+
+# Mac 本地构建 / Wine 产物（勿提交）
+release/
+ipc/tools/
+*.dxvk-cache
+settings.dat
+
+# 本机桥目录误拷（含账户状态）
+**/Common/Files/xau_state.json
+**/Common/Files/xau_deals.jsonl
+bridge-path.txt

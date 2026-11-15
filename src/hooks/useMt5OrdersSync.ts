@@ -34,7 +34,7 @@ export function useMt5OrdersSync(enabled: boolean, symbol: string, tick: number)
       }
     };
     void load();
-    const id = window.setInterval(() => void load(), 1500);
+    const id = window.setInterval(() => void load(), 80);
     return () => {
       cancelled = true;
       clearInterval(id);

@@ -59,6 +59,7 @@ export interface Position {
   openTime: number;
   /** MT5 浮动盈亏；演示仓由前端按现价估算 */
   profitUsd?: number;
+  symbol?: string;
 }
 
 export interface PendingOrder {

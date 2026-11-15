@@ -41,9 +41,19 @@ Risk design: **[docs/RISK_DESIGN_AND_PHILOSOPHY.md](docs/RISK_DESIGN_AND_PHILOSO
 
 ### macOS (portable execution via MQL5)
 
-The **supported production build is Windows** (Python gateway + local MT5). For Mac, use the same repo as the UI/risk spec and implement execution in **MQL5**:
+The **supported production build is Windows** (Python gateway + local MT5). For Mac, the same UI talks to **Wine MT5 + `XauDeskBridge` EA** via a **file bridge** (`gateway-mac`, no Python MT5 API).
 
-- **[docs/MAC_VERSION.md](docs/MAC_VERSION.md)** · **[docs/MQL5_RISK_GATEWAY.md](docs/MQL5_RISK_GATEWAY.md)** · **`mql5/`**
+**Measured latency (Mac track, 2025-11-16, demo account, TMGM-class ~243ms terminal ping):**
+
+| Segment | Typical | What it means |
+|---------|---------|----------------|
+| **EA queue** (trade file read → `OrderSend` call) | **~0.87ms** | Local MQL5 only; **not** click-to-fill |
+| **`OrderSend` span** (before/after in EA) | **~245ms** | Dominated by **broker RTT** inside MT5 |
+| **Gateway write → ack** | **~274ms** | Mostly the row above + ack file poll |
+
+Full detail: **[docs/artifacts/latency-summary-20251116.md](docs/artifacts/latency-summary-20251116.md)** · raw log: `docs/artifacts/latency-session-20251116.jsonl`. Re-run with `XAU_LATENCY_TRACE=1` and `npm run latency:analyze`.
+
+Docs: **[docs/MAC_EASY_CONNECT.md](docs/MAC_EASY_CONNECT.md)** · **[docs/MAC_VERSION.md](docs/MAC_VERSION.md)** · **`mql5/`**
 
 ### License
 
@@ -85,15 +95,31 @@ The **supported production build is Windows** (Python gateway + local MT5). For 
 
 风控设计：[docs/RISK_DESIGN_AND_PHILOSOPHY.md](docs/RISK_DESIGN_AND_PHILOSOPHY.md) · 版本记录：[CHANGELOG.md](CHANGELOG.md)
 
-### macOS（外出 Mac 重构路线）
+### macOS（Mac 轨 · 已可日常操盘）
 
-**默认发行版仍是 Windows 完整实盘栈。** Mac 无法用官方 Python `MetaTrader5` 包 attach 本机终端；若要在 Mac 上操盘，请阅读：
+**默认发行版仍是 Windows（Python + 官方 MT5 API）。** Mac 无 Python `MetaTrader5`，本仓库 **Mac 轨** 为：Electron 同款 UI + **`gateway-mac`** + Wine 内 **XauDeskBridge** EA（`Common/Files` 文件桥）。日常：**MT5 算法交易绿 + 打开 XauDesk**。
 
-- **[docs/MAC_VERSION.md](docs/MAC_VERSION.md)** — 克隆仓库、拓扑选型、与 Windows 版差异  
-- **[docs/MQL5_RISK_GATEWAY.md](docs/MQL5_RISK_GATEWAY.md)** — 将 `risk_engine` 迁至 MQL5 EA 的端点与清单  
-- **`mql5/`** — EA 代码目录（规划占位，欢迎 PR）
+#### Mac 延迟实测（2025-11-16，勿与 Windows 栈混读）
 
-在 Mac 上：`git clone https://github.com/imchriscy/xau-desk.git` → Cursor 打开 → 按上述文档演进 **MQL5 Risk Gateway**。
+压测 **34 笔** 市价/平仓（BTC 等），日志见 [docs/artifacts/latency-summary-20251116.md](docs/artifacts/latency-summary-20251116.md)。
+
+| 分段 | 中位数量级 | 含义 |
+|------|------------|------|
+| **EA 排队** | **~0.87ms** | EA 已读到 `xau_trade.json` → 调用 `OrderSend` **之前** 的本机处理（**不是**整单延迟） |
+| **`OrderSend` 段** | **~245ms** | EA 内 `OrderSend` 前后间隔；与 MT5 右下角 **~243ms 链路** 一致，**主体是券商网络往返** |
+| **写盘 → ack** | **~274ms** | 网关发出交易文件到收到 EA ack；**实战体感「等成交」≈ 200–280ms 主要由网络决定** |
+
+**为何与「本机 25–50ms」理论并存、不矛盾？**
+
+- **~0.87ms** 只量 **EA 内最后一小段排队**（文件已进 EA 之后）。
+- **点到 MT5 收到指令** 还应加上：UI → HTTP → 写桥文件 → **最多 ~16ms 等 EA 定时器** → **最多 ~25ms 等 ack 轮询**；该 session 多数未带 UI 时间戳，未单独汇总，粗算仍常在 **数十 ms** 量级。
+- **整笔到券商确认/持仓出现** 还要加上 **`OrderSend` 内 ~245ms**，故 **总闭环 ~200ms+ 由网络主导**，不是「平均订单亚毫秒」。
+
+> **亚毫秒/约 1ms** 仅适用于上表 **EA 排队** 一行；**不是** 从点 B 到成交的全链路。
+
+复现：`XAU_LATENCY_TRACE=1 npm run gateway:mac` → `npm run latency:watch` / `npm run latency:analyze`（默认已关 trace，不占盘）。
+
+上手：[docs/MAC_EASY_CONNECT.md](docs/MAC_EASY_CONNECT.md) · 分段：[docs/MAC_LATENCY_SEGMENTS.md](docs/MAC_LATENCY_SEGMENTS.md) · **后期路线图（含 10ms 目标）**：[docs/MAC_OPTIMIZATION_ROADMAP.md](docs/MAC_OPTIMIZATION_ROADMAP.md) · **Git 协作**：[docs/MAC_GIT_WORKFLOW.md](docs/MAC_GIT_WORKFLOW.md) · [docs/MAC_VERSION.md](docs/MAC_VERSION.md) · EA：`mql5/`
 
 ### 桌面图标打不开？
 

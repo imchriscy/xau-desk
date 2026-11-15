@@ -26,7 +26,6 @@ export default function RiskHud({ status, onOpenRisk }: Props) {
   }, []);
   void tick;
 
-  const streakOn = true;
   const dailyOn = status?.config.daily_enabled === true;
 
   if (!status) {
@@ -74,8 +73,9 @@ export default function RiskHud({ status, onOpenRisk }: Props) {
         ) : null}
         {status.exposure ? (
           <span className="field-micro">
-            单 {status.exposure.app_open_slots}/{status.exposure.max_combined_slots} · 保证金{" "}
-            {status.exposure.margin_used_usd.toFixed(0)}/{status.exposure.margin_budget_usd.toFixed(0)}
+            单 {status.exposure.app_open_slots ?? 0}/{status.exposure.max_combined_slots ?? "—"} · 保证金{" "}
+            {(status.exposure.margin_used_usd ?? 0).toFixed(0)}/
+            {(status.exposure.margin_budget_usd ?? 0).toFixed(0)}
           </span>
         ) : null}
         {(perUsd != null || perPct != null) && (

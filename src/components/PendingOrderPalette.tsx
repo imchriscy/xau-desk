@@ -87,9 +87,9 @@ export default function PendingOrderPalette({
           >
             <span className="card-type">{m.label}</span>
             {m.mode === "stop_limit" && stopLimitAwaitingTrigger ? (
-              <span className="card-step">2/2 触发</span>
+              <span className="card-step">再点图放下限价</span>
             ) : m.mode === "stop_limit" ? (
-              <span className="card-step muted">1/2 STOP</span>
+              <span className="card-step muted">先拖触发价</span>
             ) : null}
             <span className="card-lots">{lots.toFixed(2)}</span>
           </div>

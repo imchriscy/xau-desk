@@ -46,7 +46,7 @@ export default function OrderTicket({
       return;
     }
     if (!mt5Connected) {
-      onFlash?.("MT5 未连接：请打开终端并 restart-backend.cmd");
+      onFlash?.("MT5 未连接：请在 MT5 图表挂载 XauDeskExec 并开启算法交易");
       return;
     }
     onSubmit(side);

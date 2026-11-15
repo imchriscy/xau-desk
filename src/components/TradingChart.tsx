@@ -18,6 +18,7 @@ import {
 
 } from "lightweight-charts";
 
+import { coerceCandleTime, normalizeCandles } from "../candleTime";
 import type {
   Candle,
   ChartTradeOverlay,
@@ -116,13 +117,9 @@ const CHART_THEME = {
 
 
 function dedupe(candles: Candle[]): Candle[] {
-
   const m = new Map<number, Candle>();
-
-  for (const c of candles) m.set(c.time, c);
-
+  for (const c of normalizeCandles(candles)) m.set(c.time, c);
   return [...m.values()].sort((a, b) => a.time - b.time);
-
 }
 
 
@@ -186,6 +183,12 @@ interface Props {
   /** 当前市价，用于成本线浮盈与 SL/TP 金额标签 */
   markPrice?: number;
 
+  /** 卖价 Bid：实时价格线 */
+  bid?: number | null;
+
+  /** 买价 Ask：相对卖价更差的点差线，随 MT5 波动 */
+  ask?: number | null;
+
   onCrosshair: (info: CrosshairInfo) => void;
 
   onLastPrice: (price: number) => void;
@@ -220,6 +223,9 @@ interface Props {
 
   onExitDrawTool?: () => void;
 
+  /** StopLimit 第二层：在图上点一下即放下限价 */
+  onChartClick?: (clientY: number) => void;
+
 }
 
 
@@ -239,6 +245,8 @@ const TradingChart = forwardRef<TradingChartHandle, Props>(function TradingChart
     timeframe,
     overlays,
     markPrice,
+    bid = null,
+    ask = null,
     onCrosshair,
     onLastPrice,
     onLevelChange,
@@ -256,6 +264,7 @@ const TradingChart = forwardRef<TradingChartHandle, Props>(function TradingChart
     onSelectDrawing,
     onDeleteDrawing,
     onExitDrawTool,
+    onChartClick,
   },
 
   ref,
@@ -334,6 +343,10 @@ const TradingChart = forwardRef<TradingChartHandle, Props>(function TradingChart
 
   const markPriceRef = useRef(markPrice);
   markPriceRef.current = markPrice;
+  const bidRef = useRef<number | null>(bid ?? null);
+  const askRef = useRef<number | null>(ask ?? null);
+  bidRef.current = bid ?? null;
+  askRef.current = ask ?? null;
 
   const pendingDragPreviewRef = useRef(pendingDragPreview);
   pendingDragPreviewRef.current = pendingDragPreview;
@@ -531,6 +544,30 @@ const TradingChart = forwardRef<TradingChartHandle, Props>(function TradingChart
         }
       }
 
+      const bidPx = bidRef.current;
+      const askPx = askRef.current;
+      if (bidPx != null && isDrawablePrice(bidPx, anchor)) {
+        touch("quote-bid", {
+          price: bidPx,
+          color: "#ef5350",
+          lineWidth: 1,
+          lineStyle: 0,
+          axisLabelVisible: true,
+          title: `卖 ${bidPx.toFixed(2)}`,
+        });
+      }
+      if (askPx != null && bidPx != null && isDrawablePrice(askPx, anchor)) {
+        const spread = askPx - bidPx;
+        touch("quote-ask", {
+          price: askPx,
+          color: "#26a69a",
+          lineWidth: 1,
+          lineStyle: 2,
+          axisLabelVisible: true,
+          title: `买 ${askPx.toFixed(2)} 差 ${spread.toFixed(2)}`,
+        });
+      }
+
       const preview = pendingDragPreviewRef.current;
       if (preview && isDrawablePrice(preview.price, anchor)) {
         const color = preview.side === "buy" ? "#2962ff" : "#ef5350";
@@ -709,13 +746,9 @@ const TradingChart = forwardRef<TradingChartHandle, Props>(function TradingChart
 
       wickDownColor: "#ef5350",
 
-      lastValueVisible: true,
+      lastValueVisible: false,
 
-      priceLineVisible: true,
-
-      priceLineColor: "#758696",
-
-      priceLineWidth: 1,
+      priceLineVisible: false,
 
     });
 
@@ -842,6 +875,10 @@ const TradingChart = forwardRef<TradingChartHandle, Props>(function TradingChart
     syncPriceLines({ titlesOnly: true });
   }, [overlays, pendingDragPreview, markPrice]);
 
+  useEffect(() => {
+    syncPriceLines();
+  }, [bid, ask]);
+
 
 
   useEffect(() => {
@@ -857,13 +894,16 @@ const TradingChart = forwardRef<TradingChartHandle, Props>(function TradingChart
     const clean = dedupe(candles);
     candleMapRef.current = new Map(clean.map((c) => [c.time, c]));
 
-    const toBar = (c: Candle) => ({
-      time: c.time as Time,
-      open: c.open,
-      high: c.high,
-      low: c.low,
-      close: c.close,
-    });
+    const toBar = (c: Candle) => {
+      const t = coerceCandleTime(c.time);
+      return {
+        time: t as Time,
+        open: c.open,
+        high: c.high,
+        low: c.low,
+        close: c.close,
+      };
+    };
 
     const tfChanged = prevTfRef.current !== timeframe;
     const sameAnchor =
@@ -877,11 +917,17 @@ const TradingChart = forwardRef<TradingChartHandle, Props>(function TradingChart
       i === clean.length - 1 ? clampLastBarWicks(c) : c,
     );
 
-    if (sameAnchor && clean.length >= prevLenRef.current - 1) {
-      const start = Math.max(0, prevLenRef.current - 1);
-      for (let i = start; i < barsForChart.length; i++) {
-        series.update(toBar(barsForChart[i]));
+    const tailLen = clean.length - prevLenRef.current;
+    if (
+      sameAnchor &&
+      clean.length >= prevLenRef.current &&
+      tailLen >= 0 &&
+      tailLen <= 1
+    ) {
+      if (tailLen === 1 && clean.length >= 2) {
+        series.update(toBar(barsForChart[barsForChart.length - 2]));
       }
+      series.update(toBar(barsForChart[barsForChart.length - 1]));
     } else {
       const ts = chart.timeScale();
       const prevRange = ts.getVisibleLogicalRange();
@@ -1361,7 +1407,16 @@ const TradingChart = forwardRef<TradingChartHandle, Props>(function TradingChart
 
   return (
 
-    <div ref={wrapRef} className={`chart-wrap${activeDrawTool ? " chart-wrap-draw" : ""}`}>
+    <div
+      ref={wrapRef}
+      className={`chart-wrap${activeDrawTool ? " chart-wrap-draw" : ""}`}
+      onClick={(e) => {
+        if (!onChartClick) return;
+        const el = e.target as HTMLElement;
+        if (el.closest("button")) return;
+        onChartClick(e.clientY);
+      }}
+    >
 
       <div ref={hostRef} className="chart-host" />
 

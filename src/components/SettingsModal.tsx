@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import type { Mt5AccountSnapshot } from "../api/mt5";
-import { detectMt5Account } from "../api/mt5";
+import { detectMt5Account, rescanMt5Bridge } from "../api/mt5";
 import type { AppSettings } from "../settingsStorage";
 import SettingsRiskLog from "./SettingsRiskLog";
 import CollapsibleHelp from "./CollapsibleHelp";
@@ -32,9 +32,12 @@ export default function SettingsModal({
     setBusy(true);
     setMsg("");
     try {
+      await rescanMt5Bridge();
       const a = await detectMt5Account();
       if (!a.online) {
-        setMsg("MT5 未登录或未连接；请在 MetaTrader 5 登录目标账户并开启「算法交易」");
+        setMsg(
+          "MT5 未连接：请登录 MT5 → 开启算法交易 → 在黄金图表挂载 XauDeskBridge（或运行 scripts/mt5-autoload-ea.sh）",
+        );
         return;
       }
       onAccountChange();
@@ -93,7 +96,14 @@ export default function SettingsModal({
             <li>在 MetaTrader 5 本地登录你要交易的账户（模拟/实盘以 MT5 为准）。</li>
             <li>在 MT5 工具栏开启<strong>算法交易</strong>（AutoTrading）。</li>
             <li>保持本终端与网关运行；图表与账户会自动同步，也可点上方「刷新 MT5 连接」。</li>
-            <li>换账户时：只需在 MT5 切换登录，再点刷新即可，无需在本界面填写账号密码。</li>
+            <li>
+              换账户时：在 MT5 登录新账号即可；XauDesk 约每秒检测，或点「刷新 MT5
+              连接」。账户/净值变化会自动切换显示。
+            </li>
+            <li>
+              Mac 首次：在黄金图表挂 <strong>XauDeskBridge</strong>（或运行{" "}
+              <code>scripts/mt5-autoload-ea.sh</code>），仅需配置一次。
+            </li>
             <li>网关异常时运行项目内的 restart-backend.cmd。</li>
           </ol>
         </CollapsibleHelp>

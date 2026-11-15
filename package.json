@@ -13,10 +13,37 @@
   "keywords": ["metatrader5", "xauusd", "gold", "trading-terminal", "risk-management", "electron"],
   "main": "electron/main.cjs",
   "scripts": {
+    "ipc:smoke": "python3 ipc/scripts/smoke_ipc.py",
+    "ipc:server": "bash ipc/scripts/run-ipc-server.sh",
     "dev": "vite",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "desktop": "electron ."
+    "desktop": "electron .",
+    "gateway:mac": "node gateway-mac/server.mjs",
+    "latency:watch": "node scripts/latency-watch.mjs",
+    "latency:analyze": "node scripts/analyze-latency.mjs",
+    "mac:pack": "npm run build && electron-builder --mac dir",
+    "mac:install": "bash scripts/install-mac-app.sh",
+    "mac:setup": "bash scripts/mac-setup-once.sh"
+  },
+  "build": {
+    "appId": "com.imchriscy.xaudesk",
+    "productName": "XauDesk",
+    "directories": { "output": "release" },
+    "files": ["dist/**/*", "electron/**/*", "build/icon.icns", "package.json"],
+    "extraResources": [
+      { "from": "build/icon.icns", "to": "icon.icns" },
+      { "from": "gateway-mac", "to": "gateway-mac" }
+    ],
+    "asar": true,
+    "asarUnpack": ["dist/**/*"],
+    "afterPack": "scripts/electron-after-pack.cjs",
+    "mac": {
+      "icon": "build/icon.icns",
+      "category": "public.app-category.finance",
+      "target": [{ "target": "dir", "arch": ["arm64", "x64"] }],
+      "identity": null
+    }
   },
   "dependencies": {
     "lightweight-charts": "^4.2.2",
@@ -29,6 +56,7 @@
     "@vitejs/plugin-react": "^4.3.4",
     "typescript": "^5.6.3",
     "vite": "^5.4.11",
-    "electron": "^33.2.0"
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
   }
 }

@@ -1,3 +1,4 @@
+import { normalizeCandles } from "../candleTime";
 import type { Candle, Timeframe } from "../types";
 
 const BASE = "/api";
@@ -22,6 +23,13 @@ export interface Mt5Status {
   server?: string;
   terminal?: string;
   error?: string;
+  state_age_ms?: number | null;
+  account_ts?: number;
+  bridge_dir?: string;
+  bridge_session?: string;
+  state_path?: string;
+  stale_login?: number;
+  stale_server?: string;
 }
 
 export interface QuoteResponse {
@@ -50,6 +58,29 @@ export interface PingResponse {
   ts: number;
 }
 
+export async function autoAttachMt5Bridge(): Promise<{
+  ok: boolean;
+  action?: string;
+  reason?: string;
+  note?: string;
+}> {
+  const res = await fetch(`${BASE}/mt5/auto-attach`, { method: "POST" });
+  if (!res.ok) throw new Error(await apiErrorMessage(res, "自动挂载 MT5 Bridge 失败"));
+  return res.json();
+}
+
+export async function rescanMt5Bridge(): Promise<{
+  ok: boolean;
+  changed: boolean;
+  bridge_dir?: string;
+  login?: number;
+  server?: string;
+}> {
+  const res = await fetch(`${BASE}/bridge/rescan`, { method: "POST" });
+  if (!res.ok) throw new Error(await apiErrorMessage(res, "重新扫描 MT5 桥目录失败"));
+  return res.json();
+}
+
 export async function fetchMt5Status(): Promise<Mt5Status> {
   const res = await fetch(`${BASE}/mt5/status`);
   if (!res.ok) throw new Error(await res.text());
@@ -65,9 +96,29 @@ export async function pingMt5(): Promise<PingResponse & { rtt_ms: number }> {
   return { ...body, rtt_ms };
 }
 
-export async function fetchQuote(): Promise<QuoteResponse & { rtt_ms: number }> {
+export async function fetchSymbolMap(): Promise<{
+  map: Record<string, string> | null;
+  instrument?: string;
+}> {
+  const res = await fetch(`${BASE}/symbol/map`);
+  if (!res.ok) throw new Error(await apiErrorMessage(res, "读取品种映射失败"));
+  return res.json() as Promise<{ map: Record<string, string> | null; instrument?: string }>;
+}
+
+export async function setActiveInstrument(instrument: string): Promise<{ ok: boolean; instrument: string }> {
+  const res = await fetch(`${BASE}/symbol/active`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ instrument }),
+  });
+  if (!res.ok) throw new Error(await apiErrorMessage(res, "切换品种失败"));
+  return res.json() as Promise<{ ok: boolean; instrument: string }>;
+}
+
+export async function fetchQuote(symbol?: string): Promise<QuoteResponse & { rtt_ms: number }> {
   const t0 = performance.now();
-  const res = await fetch(`${BASE}/quote`);
+  const q = symbol ? `?symbol=${encodeURIComponent(symbol)}` : "";
+  const res = await fetch(`${BASE}/quote${q}`);
   const rtt_ms = performance.now() - t0;
   if (!res.ok) throw new Error(await res.text());
   const body = (await res.json()) as QuoteResponse;
@@ -77,13 +128,15 @@ export async function fetchQuote(): Promise<QuoteResponse & { rtt_ms: number }> 
 export async function fetchBars(
   timeframe: Timeframe,
   signal?: AbortSignal,
+  symbol?: string,
 ): Promise<BarsResponse & { rtt_ms: number }> {
   const t0 = performance.now();
-  const res = await fetch(`${BASE}/bars?timeframe=${encodeURIComponent(timeframe)}`, { signal });
+  const symQ = symbol ? `&symbol=${encodeURIComponent(symbol)}` : "";
+  const res = await fetch(`${BASE}/bars?timeframe=${encodeURIComponent(timeframe)}${symQ}`, { signal });
   const rtt_ms = performance.now() - t0;
   if (!res.ok) throw new Error(await res.text());
   const body = (await res.json()) as BarsResponse;
-  return { ...body, rtt_ms };
+  return { ...body, candles: normalizeCandles(body.candles ?? []), rtt_ms };
 }
 
 export type AccountKind = "demo" | "real";
@@ -170,6 +223,7 @@ export async function sendPendingOrder(body: {
   mode: "limit" | "stop" | "stop_limit";
   side: "buy" | "sell";
   lots: number;
+  symbol?: string;
   price: number;
   stoplimit?: number | null;
   sl?: number | null;
@@ -182,8 +236,8 @@ export async function sendPendingOrder(body: {
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(await apiErrorMessage(res, "挂单失败"));
-  const data = (await res.json()) as { ok?: boolean; detail?: string; order?: number };
-  return { ok: !!data.ok, order: data.order };
+  const data = (await res.json()) as { ok?: boolean; detail?: string; order?: number; ticket?: number };
+  return { ok: !!data.ok, order: data.order ?? data.ticket };
 }
 
 export interface Mt5OrderRow {
@@ -245,30 +299,73 @@ export async function sendLimitOrder(body: {
   return { ok: !!data.ok };
 }
 
-export async function sendMarketOrder(body: {
-  side: "buy" | "sell";
-  lots: number;
-  sl?: number | null;
-  tp?: number | null;
-  allow_demo_mt5?: boolean;
-}): Promise<{ ok: boolean; detail?: string; mt5_ms?: number }> {
+export type OrderLatencyTrace = {
+  trace_id?: string;
+  ui_t0_ms?: number;
+};
+
+export type OrderLatencySummary = {
+  trace_id?: string;
+  click_to_cmd_write_ms?: number;
+  click_to_ack_ms?: number;
+  cmd_write_to_ack_ms?: number;
+  gw_polls?: number;
+};
+
+export async function sendMarketOrder(
+  body: {
+    side: "buy" | "sell";
+    lots: number;
+    symbol?: string;
+    sl?: number | null;
+    tp?: number | null;
+    allow_demo_mt5?: boolean;
+  } & OrderLatencyTrace,
+): Promise<{
+  ok: boolean;
+  detail?: string;
+  mt5_ms?: number;
+  ticket?: number;
+  price?: number;
+  side?: "buy" | "sell";
+  lots?: number;
+  latency?: { summary?: OrderLatencySummary };
+}> {
   const res = await fetch(`${BASE}/order/market`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  const data = (await res.json()) as { ok?: boolean; detail?: string; mt5_ms?: number };
-  if (!res.ok) throw new Error(data.detail ?? JSON.stringify(data));
-  return { ok: !!data.ok, mt5_ms: data.mt5_ms, detail: data.detail };
+  const data = (await res.json()) as {
+    ok?: boolean;
+    detail?: string;
+    mt5_ms?: number;
+    ticket?: number;
+    price?: number;
+    side?: "buy" | "sell";
+    lots?: number;
+    latency?: { summary?: OrderLatencySummary };
+  };
+  if (!res.ok) throw new Error(data.detail ?? "下单失败");
+  return {
+    ok: !!data.ok,
+    mt5_ms: data.mt5_ms,
+    detail: data.detail,
+    ticket: data.ticket,
+    price: data.price,
+    side: data.side,
+    lots: data.lots,
+    latency: data.latency,
+  };
 }
 
-export async function closeMt5Position(ticket: number): Promise<void> {
+export async function closeMt5Position(ticket: number, trace?: OrderLatencyTrace): Promise<void> {
   const res = await fetch(`${BASE}/order/close`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ ticket }),
+    body: JSON.stringify({ ticket, ...trace }),
   });
-  if (!res.ok) throw new Error(await res.text());
+  if (!res.ok) throw new Error(await apiErrorMessage(res, "平仓失败"));
 }
 
 export async function modifyMt5Position(ticket: number, sl?: number | null, tp?: number | null): Promise<void> {

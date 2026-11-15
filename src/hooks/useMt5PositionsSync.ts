@@ -13,10 +13,11 @@ function mapRow(r: Awaited<ReturnType<typeof fetchMt5Positions>>[number]): Posit
     tp: r.tp,
     openTime: r.open_time,
     profitUsd: r.profit,
+    symbol: r.symbol,
   };
 }
 
-export function useMt5PositionsSync(enabled: boolean, symbol: string, tick: number) {
+export function useMt5PositionsSync(enabled: boolean, symbol: string | undefined, tick: number) {
   const [positions, setPositions] = useState<Position[]>([]);
 
   useEffect(() => {
@@ -27,14 +28,14 @@ export function useMt5PositionsSync(enabled: boolean, symbol: string, tick: numb
     let cancelled = false;
     const load = async () => {
       try {
-        const rows = await fetchMt5Positions(symbol);
+        const rows = await fetchMt5Positions(symbol || undefined);
         if (!cancelled) setPositions(rows.map(mapRow));
       } catch {
         /* keep last */
       }
     };
     void load();
-    const id = window.setInterval(() => void load(), 1500);
+    const id = window.setInterval(() => void load(), 80);
     return () => {
       cancelled = true;
       clearInterval(id);

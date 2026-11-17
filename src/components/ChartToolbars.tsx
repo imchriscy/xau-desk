@@ -19,8 +19,6 @@ interface Props {
   selectedDrawingId?: string | null;
   onDeleteSelectedDrawing?: () => void;
   onScrollToLatest?: () => void;
-  onOpenTickSpread?: () => void;
-  tickSpreadActive?: boolean;
 }
 
 export default function ChartToolbars({
@@ -35,8 +33,6 @@ export default function ChartToolbars({
   selectedDrawingId = null,
   onDeleteSelectedDrawing,
   onScrollToLatest,
-  onOpenTickSpread,
-  tickSpreadActive = false,
 }: Props) {
   return (
     <div className="chart-command-bar">
@@ -86,14 +82,6 @@ export default function ChartToolbars({
       <div className="chart-command-spacer" />
 
       <div className="chart-command-section chart-command-actions">
-        <button
-          type="button"
-          className={`tool-btn tool-btn-compact ${tickSpreadActive ? "active" : ""}`}
-          title="实时买卖价差 Tick 图"
-          onClick={() => onOpenTickSpread?.()}
-        >
-          Tick价差
-        </button>
         <button
           type="button"
           className="tool-btn tool-btn-compact"

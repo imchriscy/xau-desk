@@ -13,7 +13,6 @@ import DailyHardRiskPanel from "./components/DailyHardRiskPanel";
 import StreakOrdinanceModal from "./components/StreakOrdinanceModal";
 import { useStreakOrdinanceAlert } from "./hooks/useStreakOrdinanceAlert";
 import ChartToolbars from "./components/ChartToolbars";
-import BidAskTickChartModal from "./components/BidAskTickChartModal";
 import ChartIndicatorLegend from "./components/ChartIndicatorLegend";
 import Mt5ConnectBanner from "./components/Mt5ConnectBanner";
 import { buildIndicatorRenderPlans } from "./chartIndicators";
@@ -207,7 +206,6 @@ export default function App() {
 
   const chartRef = useRef<TradingChartHandle>(null);
   const pendingTfScrollRef = useRef<Timeframe | null>(null);
-  const [tickSpreadOpen, setTickSpreadOpen] = useState(false);
 
   const onTimeframe = useCallback((tf: Timeframe) => {
     if (tf === timeframe) return;
@@ -438,8 +436,6 @@ export default function App() {
     queueMicrotask(() => chartRef.current?.resetVisibleRange());
   }, [reloadBars]);
 
-  const lastCandleTime = candles.length > 0 ? candles[candles.length - 1].time : 0;
-
   useEffect(() => {
     if (pendingTfScrollRef.current !== timeframe) return;
     if (market.loadingTf || candles.length === 0) return;
@@ -453,7 +449,7 @@ export default function App() {
       cancelAnimationFrame(raf1);
       window.clearTimeout(t);
     };
-  }, [timeframe, market.loadingTf, candles.length, lastCandleTime]);
+  }, [timeframe, market.loadingTf, candles.length]);
 
   const prevClose = candles.length > 2 ? candles[candles.length - 2].close : lastPrice;
 
@@ -1257,22 +1253,39 @@ export default function App() {
             <h1 className="top-symbol" title={market.symbol || instrumentById(tradeInstrument).label}>
               {market.symbol || instrumentById(tradeInstrument).label}
             </h1>
-            <span className="top-price last">{formatPrice(lastPrice, tradeInstrument)}</span>
-            {market.bid != null && market.ask != null ? (
-              <span className="meta bid-ask top-bid-ask">
-                Bid {formatPrice(market.bid, tradeInstrument)} · Ask {formatPrice(market.ask, tradeInstrument)}
-              </span>
-            ) : null}
-            <span className={`top-chg ${chg >= 0 ? "chg-up" : "chg-down"}`}>
-              {chg >= 0 ? "+" : ""}
-              {chg.toFixed(2)} ({chgPct >= 0 ? "+" : ""}
-              {chgPct.toFixed(2)}%)
+            <span className="top-stat-slot top-price last">
+              {formatPrice(lastPrice, tradeInstrument)}
             </span>
-            <span className="meta top-kline-tag">{market.source === "mt5" ? "MT5 K 线" : "离线 K 线"}</span>
+            {market.bid != null && market.ask != null ? (
+              <div className="top-quote-grid" aria-label="买卖报价">
+                <span className="top-quote-label">Bid</span>
+                <span className="top-quote-num bid">
+                  {formatPrice(market.bid, tradeInstrument)}
+                </span>
+                <span className="top-quote-label">Ask</span>
+                <span className="top-quote-num ask">
+                  {formatPrice(market.ask, tradeInstrument)}
+                </span>
+                <span className="top-quote-gap" aria-hidden />
+                <span
+                  className={`top-quote-num top-quote-chg ${chg >= 0 ? "chg-up" : "chg-down"}`}
+                >
+                  {chg >= 0 ? "+" : ""}
+                  {chg.toFixed(2)} ({chgPct >= 0 ? "+" : ""}
+                  {chgPct.toFixed(2)}%)
+                </span>
+              </div>
+            ) : (
+              <span className={`top-stat-slot top-chg ${chg >= 0 ? "chg-up" : "chg-down"}`}>
+                {chg >= 0 ? "+" : ""}
+                {chg.toFixed(2)} ({chgPct >= 0 ? "+" : ""}
+                {chgPct.toFixed(2)}%)
+              </span>
+            )}
           </div>
           <div className="top-bar-meta-row">
             {account ? (
-              <span className="meta acct-mini">
+              <span className="top-stat-slot meta acct-mini">
                 #{account.login} · {account.server} · 净值 {account.equity.toFixed(2)} {account.currency} · 余额{" "}
                 {account.balance.toFixed(2)}
               </span>
@@ -1284,7 +1297,7 @@ export default function App() {
             ) : null}
             {account && dailyPnlUsd != null ? (
               <span
-                className={`daily-pnl-chip ${dailyPnlUsd >= 0 ? "up" : "down"}`}
+                className={`top-stat-slot daily-pnl-chip ${dailyPnlUsd >= 0 ? "up" : "down"}`}
                 title={
                   riskStatus?.config.baseline_equity != null
                     ? "相对日风控基准净值（北京 06:00 交易窗）"
@@ -1301,20 +1314,11 @@ export default function App() {
         <div className="top-actions">
 
           <span
-            className={`chip latency ${market.connected ? "ok" : "bad"}`}
-            title="MT5 ms 是状态文件里的报价耗时。RTT 是本机页面到网关的 HTTP 往返中位数，不是券商延迟，也不是按 B 下单耗时。偶尔到几百毫秒，是 K 线请求或 Wine 写文件堵住了这一下读取。"
+            className="top-latency-plain"
+            title="MT5 ms 是状态文件里的报价耗时。RTT 是本机到网关 HTTP 往返，非下单全程延迟。"
           >
-            <span className="lat-part">
-              MT5{" "}
-              <span className="lat-num">{market.latency.mt5_ms != null ? market.latency.mt5_ms.toFixed(1) : "—"}</span>{" "}
-              ms
-            </span>
-            <span className="lat-sep">·</span>
-            <span className="lat-part">
-              RTT{" "}
-              <span className="lat-num">{market.latency.rtt_ms != null ? market.latency.rtt_ms.toFixed(0) : "—"}</span>{" "}
-              ms
-            </span>
+            MT5 {market.latency.mt5_ms != null ? market.latency.mt5_ms.toFixed(1) : "—"} ms · RTT{" "}
+            {market.latency.rtt_ms != null ? market.latency.rtt_ms.toFixed(0) : "—"} ms
           </span>
 
           <span
@@ -1382,14 +1386,6 @@ export default function App() {
         selectedDrawingId={selectedDrawingId}
         onDeleteSelectedDrawing={deleteSelectedDrawing}
         onScrollToLatest={() => chartRef.current?.scrollToLatest()}
-        onOpenTickSpread={() => setTickSpreadOpen(true)}
-        tickSpreadActive={tickSpreadOpen}
-      />
-
-      <BidAskTickChartModal
-        open={tickSpreadOpen}
-        symbol={market.symbol}
-        onClose={() => setTickSpreadOpen(false)}
       />
 
       <SettingsModal

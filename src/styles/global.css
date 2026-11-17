@@ -91,23 +91,85 @@ select {
   white-space: nowrap;
 }
 
+/* 顶栏数字区：等宽数字 + 最小宽度，避免报价/盈亏刷新时左右跳 */
+.top-stat-slot {
+  display: inline-block;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+  white-space: nowrap;
+  text-align: left;
+}
+
 .top-price.last {
   font-size: 1.35rem;
   font-weight: 600;
-  font-variant-numeric: tabular-nums;
+  min-width: 7ch;
+  text-align: right;
 }
 
-.top-bid-ask {
+.top-quote-grid {
+  display: inline-grid;
+  grid-template-columns: auto 8ch auto 8ch 1.25rem minmax(10ch, auto);
+  align-items: baseline;
+  column-gap: 0.35rem;
+  font-size: 0.8rem;
+}
+
+.top-quote-label {
+  color: var(--text-muted, #787b86);
+  font-size: 0.72rem;
   white-space: nowrap;
+}
+
+.top-quote-num {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
+  text-align: right;
+  white-space: nowrap;
+}
+
+.top-quote-gap {
+  display: block;
+}
+
+.top-quote-chg {
+  grid-column: 6;
+  font-size: 0.8rem;
+  min-width: 10ch;
+  text-align: left;
 }
 
 .top-chg {
   font-size: 0.8rem;
+  min-width: 11ch;
+  text-align: right;
+}
+
+.top-latency-plain {
+  font-size: 0.72rem;
+  color: var(--text-muted, #787b86);
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum";
   white-space: nowrap;
 }
 
-.top-kline-tag {
-  white-space: nowrap;
+.acct-mini.top-stat-slot {
+  min-width: 28rem;
+  max-width: 100%;
+}
+
+.daily-pnl-chip.top-stat-slot {
+  min-width: 11ch;
+  text-align: right;
+}
+
+.lat-part.top-stat-slot {
+  min-width: 6.5ch;
+  text-align: right;
+}
+
+.lat-part-rtt {
+  min-width: 5.5ch;
 }
 
 .symbol-block {

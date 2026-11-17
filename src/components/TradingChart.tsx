@@ -297,6 +297,8 @@ const TradingChart = forwardRef<TradingChartHandle, Props>(function TradingChart
   const prevTfRef = useRef(timeframe);
   const prevLenRef = useRef(0);
   const prevFirstTimeRef = useRef<number | null>(null);
+  /** 用户拖离最新 K 后保持视口，直至点「最新」 */
+  const userViewPinnedRef = useRef(false);
 
   const [dragHint, setDragHint] = useState<string | null>(null);
   const posLabelRefs = useRef<Map<string, HTMLDivElement>>(new Map());
@@ -363,6 +365,7 @@ const TradingChart = forwardRef<TradingChartHandle, Props>(function TradingChart
 
     if (!chart || clean.length === 0) return;
 
+    userViewPinnedRef.current = false;
     chart.timeScale().setVisibleLogicalRange(latestVisibleLogicalRange(clean.length, tf));
 
   };
@@ -421,6 +424,7 @@ const TradingChart = forwardRef<TradingChartHandle, Props>(function TradingChart
     const chart = chartRef.current;
     const clean = dedupe(candlesRef.current);
     if (!chart || clean.length === 0) return;
+    userViewPinnedRef.current = false;
     chart.timeScale().setVisibleLogicalRange(
       latestVisibleLogicalRange(clean.length, timeframeRef.current),
     );
@@ -773,8 +777,16 @@ const TradingChart = forwardRef<TradingChartHandle, Props>(function TradingChart
 
 
 
-    const bumpCoords = () => setCoordTick((n) => n + 1);
-    chart.timeScale().subscribeVisibleLogicalRangeChange(bumpCoords);
+    const onVisibleRange = () => {
+      setCoordTick((n) => n + 1);
+      const ts = chart.timeScale();
+      const range = ts.getVisibleLogicalRange();
+      const len = prevLenRef.current || candlesRef.current.length;
+      if (range && len > 0) {
+        userViewPinnedRef.current = range.to < len - 1.5;
+      }
+    };
+    chart.timeScale().subscribeVisibleLogicalRangeChange(onVisibleRange);
 
     chart.subscribeCrosshairMove((param) => {
       if (dragRef.current) return;
@@ -806,7 +818,7 @@ const TradingChart = forwardRef<TradingChartHandle, Props>(function TradingChart
 
       ro.disconnect();
 
-      chart.timeScale().unsubscribeVisibleLogicalRangeChange(bumpCoords);
+      chart.timeScale().unsubscribeVisibleLogicalRangeChange(onVisibleRange);
 
       disposeAllPriceLines();
 
@@ -918,16 +930,19 @@ const TradingChart = forwardRef<TradingChartHandle, Props>(function TradingChart
     );
 
     const tailLen = clean.length - prevLenRef.current;
-    if (
-      sameAnchor &&
-      clean.length >= prevLenRef.current &&
-      tailLen >= 0 &&
-      tailLen <= 1
-    ) {
-      if (tailLen === 1 && clean.length >= 2) {
-        series.update(toBar(barsForChart[barsForChart.length - 2]));
+    const canTailUpdate =
+    sameAnchor &&
+    clean.length >= prevLenRef.current &&
+    tailLen >= 0 &&
+    tailLen <= 2;
+    if (canTailUpdate) {
+      if (tailLen >= 1 && clean.length >= 2) {
+        const from = Math.max(0, clean.length - 1 - tailLen);
+        for (let i = from; i < clean.length - 1; i++) {
+          series.update(toBar(barsForChart[i]!));
+        }
       }
-      series.update(toBar(barsForChart[barsForChart.length - 1]));
+      series.update(toBar(barsForChart[barsForChart.length - 1]!));
     } else {
       const ts = chart.timeScale();
       const prevRange = ts.getVisibleLogicalRange();
@@ -940,16 +955,18 @@ const TradingChart = forwardRef<TradingChartHandle, Props>(function TradingChart
       const snapLatest = () => {
         ts.setVisibleLogicalRange(latestVisibleLogicalRange(clean.length, timeframe));
       };
-      // 切换周期：必须对齐最新（勿沿用上一周期的 logical range）
-      // 新周期 K 线到达时 tfChanged 已为 false，用 !sameAnchor 兜底
-      if (tfChanged || !sameAnchor || !prevRange) {
+      const pinned = userViewPinnedRef.current;
+      if (tfChanged) {
+        snapLatest();
+      } else if (!prevRange) {
         snapLatest();
       } else {
         const added =
-          prevLenRef.current > 0 && clean.length > prevLenRef.current && prevFirstTimeRef.current === clean[0].time
+          prevLenRef.current > 0 && clean.length > prevLenRef.current
             ? clean.length - prevLenRef.current
             : 0;
-        if (added > 0) {
+        const atLive = prevRange.to >= prevLenRef.current - 1.5;
+        if (added > 0 && !pinned && atLive) {
           ts.setVisibleLogicalRange({ from: prevRange.from + added, to: prevRange.to + added });
         } else {
           ts.setVisibleLogicalRange(prevRange);

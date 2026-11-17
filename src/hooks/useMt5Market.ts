@@ -89,9 +89,21 @@ export function useMt5Market(timeframe: Timeframe, refreshKey: number, instrumen
       const res = await fetchBars(tf, ac.signal, hint);
       if (ac.signal.aborted || tfRef.current !== tf) return;
       const last = res.candles[res.candles.length - 1];
-      setState((s) => ({
+      setState((s) => {
+        let candles = res.candles;
+        if (!force && s.candles.length > 0 && res.candles.length > 0) {
+          const byTime = new Map<number, (typeof res.candles)[0]>();
+          for (const c of s.candles) byTime.set(c.time, c);
+          for (const c of res.candles) byTime.set(c.time, c);
+          const minTime = res.candles[0]!.time;
+          candles = [...byTime.entries()]
+            .sort((a, b) => a[0] - b[0])
+            .filter(([t]) => t >= minTime)
+            .map(([, c]) => c);
+        }
+        return {
         ...s,
-        candles: res.candles,
+        candles,
         lastPrice: last?.close ?? s.lastPrice,
         symbol: res.symbol,
         source: "mt5",
@@ -103,7 +115,8 @@ export function useMt5Market(timeframe: Timeframe, refreshKey: number, instrumen
           mt5_ms: res.mt5_ms,
           rtt_ms: res.rtt_ms,
         },
-      }));
+      };
+      });
     } catch (e) {
       if (ac.signal.aborted) return;
       const msg = e instanceof Error ? e.message : String(e);

@@ -27,6 +27,9 @@ export interface Mt5Status {
   account_ts?: number;
   bridge_dir?: string;
   bridge_session?: string;
+  bridge_ver?: string;
+  bridge_ver_required?: string;
+  bridge_ver_ok?: boolean;
   state_path?: string;
   stale_login?: number;
   stale_server?: string;
@@ -188,7 +191,14 @@ export async function fetchMt5Positions(symbol?: string): Promise<Mt5PositionRow
   const q = symbol ? `?symbol=${encodeURIComponent(symbol)}` : "";
   const res = await fetch(`${BASE}/positions${q}`);
   if (!res.ok) throw new Error(await res.text());
-  const body = (await res.json()) as { positions: Mt5PositionRow[] };
+  const body = (await res.json()) as {
+    positions: Mt5PositionRow[];
+    account_margin?: number | null;
+  };
+  const margin = body.account_margin;
+  if (margin != null && margin <= 1.5 && body.positions.length > 0) {
+    return [];
+  }
   return body.positions;
 }
 

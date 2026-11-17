@@ -250,6 +250,40 @@ export function rpcToEa(payload) {
   return rpcFile(payload, CMD_FILE, ACK_FILE, RPC_TIMEOUT_MS);
 }
 
+const SNAP_MIN_MS = Number(process.env.XAU_SNAPSHOT_MIN_MS || 55);
+const SNAP_CACHE_MS = 120;
+let snapChain = Promise.resolve();
+/** @type {{ at: number, data: Record<string, unknown> | null }} */
+let snapCache = { at: 0, data: null };
+
+/** 走 xau_cmd 让 EA 现场枚举持仓（含历史校验），避免只读陈旧 xau_state.json */
+export function fetchLiveSnapshot() {
+  const now = Date.now();
+  if (snapCache.data && now - snapCache.at < SNAP_CACHE_MS) {
+    return Promise.resolve(snapCache.data);
+  }
+  const run = snapChain.then(async () => {
+    if (snapCache.data && Date.now() - snapCache.at < SNAP_MIN_MS) {
+      return snapCache.data;
+    }
+    try {
+      const ack = await rpcFile({ op: "snapshot" }, CMD_FILE, ACK_FILE, 3500);
+      if (ack?.ok && ack.result) {
+        snapCache = { at: Date.now(), data: ack.result };
+        return ack.result;
+      }
+    } catch {
+      /* EA 忙或超时 */
+    }
+    return snapCache.data;
+  });
+  snapChain = run.then(
+    () => undefined,
+    () => undefined,
+  );
+  return run;
+}
+
 let tradeChain = Promise.resolve();
 
 /** 下单/平仓专用文件，不和 K 线抢 xau_cmd.json。 */

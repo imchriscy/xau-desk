@@ -257,10 +257,31 @@ function startUiServer(root) {
 function resolveUiRoot() {
   const root = repoRoot();
   if (!electronApp?.isPackaged) return root;
+  const resources = process.resourcesPath;
   const appPath = electronApp.getAppPath();
   const unpacked = path.join(path.dirname(appPath), "app.asar.unpacked");
-  if (fs.existsSync(path.join(unpacked, "dist", "index.html"))) return unpacked;
-  return root;
+  const candidates = [
+    path.join(resources, "app"),
+    unpacked,
+    resources,
+    root,
+  ];
+  let best = root;
+  let bestMtime = 0;
+  for (const base of candidates) {
+    const idx = path.join(base, "dist", "index.html");
+    if (!fs.existsSync(idx)) continue;
+    try {
+      const m = fs.statSync(idx).mtimeMs;
+      if (m >= bestMtime) {
+        bestMtime = m;
+        best = base;
+      }
+    } catch {
+      /* skip */
+    }
+  }
+  return best;
 }
 
 function boot() {

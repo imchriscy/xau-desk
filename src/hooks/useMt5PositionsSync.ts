@@ -17,7 +17,12 @@ function mapRow(r: Awaited<ReturnType<typeof fetchMt5Positions>>[number]): Posit
   };
 }
 
-export function useMt5PositionsSync(enabled: boolean, symbol: string | undefined, tick: number) {
+export function useMt5PositionsSync(
+  enabled: boolean,
+  symbol: string | undefined,
+  tick: number,
+  accountMargin?: number,
+) {
   const [positions, setPositions] = useState<Position[]>([]);
 
   useEffect(() => {
@@ -26,12 +31,20 @@ export function useMt5PositionsSync(enabled: boolean, symbol: string | undefined
       return;
     }
     let cancelled = false;
+    let failStreak = 0;
     const load = async () => {
       try {
-        const rows = await fetchMt5Positions(symbol || undefined);
-        if (!cancelled) setPositions(rows.map(mapRow));
+        let rows = await fetchMt5Positions(symbol || undefined);
+        if (accountMargin != null && accountMargin <= 1.5 && rows.length > 0) {
+          rows = [];
+        }
+        if (!cancelled) {
+          failStreak = 0;
+          setPositions(rows.map(mapRow));
+        }
       } catch {
-        /* keep last */
+        failStreak += 1;
+        if (!cancelled && failStreak >= 2) setPositions([]);
       }
     };
     void load();
@@ -40,7 +53,7 @@ export function useMt5PositionsSync(enabled: boolean, symbol: string | undefined
       cancelled = true;
       clearInterval(id);
     };
-  }, [enabled, symbol, tick]);
+  }, [enabled, symbol, tick, accountMargin]);
 
   return positions;
 }

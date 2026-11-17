@@ -22,6 +22,18 @@ main ─────────────────────────
 
 **不要**在 Mac 上长期直接改 `main` 却不分离提交，以免和 Windows 机上的 Rust/Python 演进搅在一起。
 
+### 最终会合并 `main`，还是另建开源仓库？
+
+| 方案 | 适合什么时候 | 本仓库建议 |
+|------|----------------|------------|
+| **单仓 + 长期功能分支**（现状） | 同一产品、共享 `src/` UI，仅网关/EA 分平台 | Mac 稳定前继续 `feature/mt5-exec-mac` |
+| **单仓 + Mac 并入 `main`** | Mac 文档/README 写清「选 Windows 或 Mac 安装路径」；CI/Release 能分 tag | **中期目标**：`main` = 共享前端 + `gateway/`（Win）+ `gateway-mac/` + `mql5/`，Windows 默认栈不变 |
+| **独立仓库** | 品牌拆分、许可证不同、或不想让 Win 用户 clone 到 Wine/EA 体量 | **暂不必要**；除非你要单独运营「XauDesk Mac」发行页 |
+
+推荐路径：**不拆仓**。稳定后做一次 **受控合并**（大 PR 或 `main` 上只增 Mac 目录与文档，不替换 Windows 默认入口）。共享 bugfix 用 **cherry-pick `src/`** 到 `main`；Mac 独占改动留在分支或合并后仍用目录隔离。
+
+另建仓库的唯一强理由：对外叙事要两个 star/issue 池、或 Windows 主线想保持「极简 clone」。维护成本会 almost 翻倍（双 PR、双 issue）。
+
 ---
 
 ## Commit 节奏（避免「改一堆再上传」）
@@ -50,7 +62,21 @@ main ─────────────────────────
 
 ---
 
-## 日常循环（你 + Cursor）
+## 日常循环（你 + Cursor）— 步骤 1 / 2 固定记下来
+
+### 步骤 1 · 小步 commit（做什么就记什么）
+
+- **EA**：一个可测行为一单（含必要时同步 `gateway-mac/mt5-payload/*.ex5`）。
+- **gateway-mac**：一块 API / 风控逻辑一单。
+- **UI**：一个用户可见问题一单。
+- **不要**把未验收的实验和已测功能混在同一 commit。
+
+### 步骤 2 · 推送节奏
+
+- **收工**或**里程碑可测** → `git push origin feature/mt5-exec-mac`。
+- 仅本地 commit、未 push：适合「明天还要继续改同一功能」；跨机器开发则当天应 push。
+
+### 步骤 0 / 3 / 4（完整循环）
 
 1. **开工前**  
    `git fetch origin` → 在 `feature/mt5-exec-mac` 上 `git pull --rebase`（仅当你单人 Mac 开发时可省略，多机必做）。
@@ -124,6 +150,32 @@ main ─────────────────────────
 3. **禁止入仓**：`release/`、`ipc/tools/`、Wine 缓存、本机桥路径与含账号的状态文件；提交前必须 `git status` 目视。
 4. **推送**：完成里程碑或你要求「上传 GitHub」时 push 功能分支；**不** force push `main`；合 `main` 用 PR + 你确认。
 5. **验证口令**：动 `mql5/` → 提醒 `compile-mt5-bridge-mac.sh`；动前端 → `npm run build`；发版再谈 tag `mac-v0.3.x-bridge.0xx`。
+
+### 对话里的验收 vs 自动 commit（交互契约）
+
+| 默认 | 例外（你明确下令时） |
+|------|----------------------|
+| **改完代码 → 给你验收清单 → 等你回复** 再 `commit` / `push` | 「做完直接 push」「今天收工同步 GitHub」「这段 OK 提交」 |
+| 助手在回复末尾写：**改了什么、你怎么测、建议 commit 文案** | 「先别提交，还在试」→ 助手只改工作区，不动 Git |
+| **不**在未点测 EA / 未 build 时主动 push 大块改动 | 纯文档、且你授权「文档可直接提交」时可当场 commit |
+
+你可把习惯固定成一句开场白，减少来回：
+
+- 任务型：`「在 feature/mt5-exec-mac 上做 X，**验收后再提交**」`
+- 同步型：`「按小步 commit，**今天收工 push**」`
+
+助手应在该轮任务结束时概括：**是否符合步骤 1（本单粒度）**、**是否已到步骤 2（该 push 否）**。
+
+---
+
+## Composer Agent + GitHub（更高效）
+
+1. **一条对话 = 一个可测任务**（如「修 BTC 平仓盈亏」），避免一个窗口里混 EA + 打包 + 文档 + Git 大杂烩。
+2. **每次开聊带上上下文**：分支名、`bridge_ver`、是否动过 `mql5/`、Windows 是否也要兼容。
+3. **GitHub 分工**：`feature/mt5-exec-mac` 日常 push；用 **Issue** 记 Mac 里程碑（标签 `mac`）；稳定块用 **draft PR** 追踪相对 `main` 的差异，不必急着合并。
+4. **Release / tag**：Windows 用现有 tag；Mac 用 `mac-v*` 前缀（见上节），在 GitHub Release 说明里写「仅 Mac 文件桥」。
+5. **让 Agent 省 token**：指名文件（`gateway-mac/risk-mac.mjs`）、指名现象（「B 键平仓后列表还在」）；验收通过再说「提交并 push」。
+6. **Project Rules**：仓库已含 `.cursor/rules/xaudesk-*.mdc`（Mac 轨 / EA / 前端），与本文「交互契约」一致；Settings → Rules 可开关。
 
 ---
 

@@ -4,8 +4,9 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 WINE_PREFIX="${WINE_PREFIX:-$HOME/Library/Application Support/net.metaquotes.wine.metatrader5}"
 MT5="$WINE_PREFIX/drive_c/Program Files/MetaTrader 5"
 
-cp -f "$ROOT/mql5/Include/BridgeRpc.mqh" "$ROOT/mql5/Include/TradeExec.mqh" "$MT5/MQL5/Include/"
+cp -f "$ROOT/mql5/Include/BridgeRpc.mqh" "$ROOT/mql5/Include/TradeExec.mqh" "$ROOT/mql5/Include/BridgeState.mqh" "$MT5/MQL5/Include/"
 cp -f "$ROOT/mql5/Experts/XauDeskBridge.mq5" "$MT5/MQL5/Experts/"
+rm -f "$MT5/MQL5/Experts/XauDeskBridge.ex5"
 
 export WINEPREFIX="$WINE_PREFIX"
 export WINEDEBUG=-all
@@ -25,4 +26,9 @@ if tr -d '\0' < "$MT5/logs/compile_bridge.log" | grep -q "Result: 0 errors"; the
   cp -f "$MT5/MQL5/Experts/XauDeskBridge.ex5" "$ROOT/gateway-mac/mt5-payload/XauDeskBridge.ex5"
   cp -f "$ROOT/mql5/Experts/XauDeskBridge.mq5" "$ROOT/gateway-mac/mt5-payload/XauDeskBridge.mq5"
 fi
-echo "已编译 XauDeskBridge.ex5，请重启 MT5 或运行 mt5-autoload-ea.sh"
+if tr -d '\0' < "$MT5/logs/compile_bridge.log" | grep -q "Result: 0 errors"; then
+  echo "已编译 XauDeskBridge.ex5 → 请运行 bash scripts/mt5-autoload-ea.sh"
+else
+  echo "编译失败，见 $MT5/logs/compile_bridge.log"
+  exit 1
+fi

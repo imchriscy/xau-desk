@@ -1,0 +1,12 @@
+---
+description: XauDeskBridge EA 与 gateway-mac 文件桥约定
+globs: mql5/**/*,gateway-mac/**/*
+alwaysApply: false
+---
+
+# 文件桥 & EA
+
+- 状态真源：EA 写 `Common/Files/xau_state.json`；gateway 只读，不伪造持仓。
+- 持仓真源：`/api/positions` 优先 EA `op:snapshot`（`BridgeState.mqh` 含历史成交校验）；`WriteState` 写全账户 JSON。
+- 改 `mql5/Experts/XauDeskBridge.mq5` 后：同步 `gateway-mac/mt5-payload/`，运行 `compile-mt5-bridge-mac.sh`，更新 `bridge_ver` 与 `#property version` 一致。
+- 共享逻辑在 `mql5/Include/`；Mac 专长在 `gateway-mac/*.mjs`。

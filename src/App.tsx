@@ -203,6 +203,7 @@ export default function App() {
   const [accountEpoch, setAccountEpoch] = useState(0);
 
   const [posSyncTick, setPosSyncTick] = useState(0);
+  const accountFinRef = useRef<string | null>(null);
 
   const chartRef = useRef<TradingChartHandle>(null);
   const pendingTfScrollRef = useRef<Timeframe | null>(null);
@@ -283,35 +284,62 @@ export default function App() {
 
   const executeOnMt5 = shouldExecuteOnMt5(account);
 
-  const mt5Positions = useMt5PositionsSync(executeOnMt5, "", posSyncTick);
+  const mt5Positions = useMt5PositionsSync(
+    executeOnMt5,
+    "",
+    posSyncTick,
+    account?.margin,
+  );
   const mt5Pending = useMt5OrdersSync(executeOnMt5, market.symbol, orderSyncTick);
   const pending = executeOnMt5 ? mt5Pending : [];
 
   const [optimisticPos, setOptimisticPos] = useState<Position[]>([]);
   const [hiddenTickets, setHiddenTickets] = useState<number[]>([]);
 
+  const flatByMargin =
+    executeOnMt5 && account != null && account.margin <= 1.5;
   const positions = executeOnMt5
-    ? [
-        ...mt5Positions.filter((p) => !hiddenTickets.includes(p.ticket)),
-        ...optimisticPos.filter(
-          (p) =>
-            !hiddenTickets.includes(p.ticket) &&
-            !mt5Positions.some((m) => m.ticket === p.ticket),
-        ),
-      ]
+    ? flatByMargin
+      ? []
+      : [
+          ...mt5Positions.filter((p) => !hiddenTickets.includes(p.ticket)),
+          ...optimisticPos.filter(
+            (p) =>
+              !hiddenTickets.includes(p.ticket) &&
+              !mt5Positions.some((m) => m.ticket === p.ticket),
+          ),
+        ]
     : paperPositions;
 
   const positionsForInstrument = useMemo(() => {
     const sym = market.symbol;
-    if (!sym) return positions;
-    return positions.filter((p) => !p.symbol || symbolsMatch(p.symbol, sym));
-  }, [positions, market.symbol]);
+    let list = sym
+      ? positions.filter((p) => !p.symbol || symbolsMatch(p.symbol, sym))
+      : positions;
+    if (executeOnMt5 && account && account.margin <= 1.5 && list.length > 0) {
+      list = [];
+    }
+    return list;
+  }, [positions, market.symbol, executeOnMt5, account?.margin]);
 
   useEffect(() => {
     const live = new Set(mt5Positions.map((p) => p.ticket));
-    setOptimisticPos((list) => list.filter((p) => live.has(p.ticket)));
+    const margin = account?.margin;
+    setOptimisticPos((list) => {
+      if (list.length === 0) return list;
+      if (live.size === 0 && margin != null && margin <= 1.5) return [];
+      return list.filter((p) => !live.has(p.ticket));
+    });
     setHiddenTickets((list) => list.filter((t) => live.has(t)));
-  }, [mt5Positions]);
+  }, [mt5Positions, account?.margin]);
+
+  useEffect(() => {
+    if (positionsForInstrument.length > 0) return;
+    const sel = selectedIdRef.current;
+    if (sel && (sel.startsWith("mt5-") || sel.startsWith("mt5-order-"))) {
+      setSelectedId(null);
+    }
+  }, [positionsForInstrument.length]);
 
   const positionsRef = useRef(positionsForInstrument);
   const pendingRef = useRef(pending);
@@ -441,6 +469,18 @@ export default function App() {
       if (hint) setFlash(hint);
     });
   }, []);
+
+  useEffect(() => {
+    if (!account || !executeOnMt5) return;
+    const fin = `${account.equity.toFixed(2)}|${account.profit.toFixed(2)}|${account.margin.toFixed(2)}`;
+    const prev = accountFinRef.current;
+    if (prev && prev !== fin) {
+      setPosSyncTick((n) => n + 1);
+      setOptimisticPos([]);
+      if (account.margin <= 1.5) setHiddenTickets([]);
+    }
+    accountFinRef.current = fin;
+  }, [account, executeOnMt5]);
 
   // 仅在市场事件（成交/改单/平仓）时默认选中最新单；轮询刷新持仓列表不得抢用户当前选中
   useEffect(() => {
@@ -783,6 +823,7 @@ export default function App() {
               sl: f.slOffset > 0 ? sl : null,
               tp: f.tpOffset > 0 ? tp : null,
               openTime: Date.now() / 1000,
+              symbol: market.symbol,
             },
           ]);
           setSelectedId(id);

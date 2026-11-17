@@ -1,0 +1,12 @@
+---
+description: XauDesk React UI 与 MT5 同步
+globs: src/**/*
+alwaysApply: false
+---
+
+# 前端 + MT5 同步
+
+- 持仓：`useMt5PositionsSync` 轮询 `/api/positions`；合并时尊重 `hiddenTickets`（本端平仓中）与 `optimisticPos`（成交后需带 `symbol`）。
+- 换品种：`positionsForInstrument` 按 `market.symbol` 过滤；全账户列表请求用空 symbol（见 `App.tsx`）。
+- 共享 UI 避免 Mac 硬编码；平台差异留在 `api/mt5.ts` / Electron 启动路径。
+- 改完运行 `npm run build`；勿在无验收时假设已 sync GitHub。

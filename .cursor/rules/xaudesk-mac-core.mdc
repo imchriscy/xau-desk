@@ -1,0 +1,24 @@
+---
+description: XauDesk Mac 轨 — 分支、Git 交互、验收再提交
+alwaysApply: true
+---
+
+# Mac 轨核心约定
+
+- 默认分支：`feature/mt5-exec-mac`；不主动改 `main`（Windows 默认栈）。
+- **Commit / push**：用户说「验收通过 / 提交 push / 收工同步」后再做；否则只改代码并给出测法。
+- 粒度：EA 一个行为 · gateway-mac 一块 API · UI 一个可见问题；见 `docs/MAC_GIT_WORKFLOW.md`。
+- 勿提交：`release/`、`ipc/tools/`、Wine 缓存、本机桥路径与含账号状态文件。
+- 动 `mql5/` → 提醒 `scripts/compile-mt5-bridge-mac.sh`；动前端 → `npm run build`。
+
+## Skills / MCP / Agent 搭配（简表）
+
+| 能力 | 何时用 |
+|------|--------|
+| **Project Rules**（本目录） | 每窗自动：分支、Git、Mac 路径 |
+| **Skills**（如 `create-rule`、`sdk`） | 用户要建 Rule/Automation/发版流程时，先读对应 `SKILL.md` |
+| **MCP `cursor-origin`** | 仓库在 Origin 时用；GitHub 用终端 `gh` |
+| **MCP `cursor-ide-browser`** | 只在与网页/Electron 内页调试相关时 |
+| **Subagent `explore`** | 大范围搜代码；单文件改动不必 spawn |
+
+用户开聊可带：`分支 + bridge_ver + 是否动 mql5 + 验收后再提交`。

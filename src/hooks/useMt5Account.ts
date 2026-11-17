@@ -36,6 +36,15 @@ export function useMt5Account(
         bridge_dir: (status as { bridge_dir?: string }).bridge_dir,
       });
 
+      if (status.connected && status.bridge_ver_ok === false) {
+        setAccount(null);
+        setError(
+          `MT5 EA 版本过旧（${status.bridge_ver ?? "?"}，需要 ≥ ${status.bridge_ver_required ?? "1.023"}）。` +
+            "请在终端运行：bash scripts/upgrade-mt5-bridge-mac.sh，或设置里「立即刷新 MT5 连接」。",
+        );
+        return;
+      }
+
       if (!status.connected) {
         const age = status.state_age_ms ?? null;
         const staleMsg =

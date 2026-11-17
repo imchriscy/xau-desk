@@ -11,6 +11,7 @@ import { fileURLToPath } from "node:url";
 import { readStateJsonFile, stateFileStalenessMs } from "./read-state-json.mjs";
 import { pickActiveBridgeDir, persistUserBridgeDir } from "./bridge-discover.mjs";
 import { detectActiveWineUser, mt5ProcessLikelyRunning } from "./wine-profile.mjs";
+import { REQUIRED_BRIDGE_VER, bridgeVerAtLeast } from "./bridge-version.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const HOME = os.homedir();
@@ -33,6 +34,18 @@ function wineBin() {
     "/Applications/MetaTrader 5.app/Contents/SharedSupport/wine/bin/wine",
   ];
   return candidates.find((p) => fs.existsSync(p)) || null;
+}
+
+function readBridgeVerFromDisk() {
+  const dir = pickActiveBridgeDir({ freshMs: 600_000 });
+  if (!dir) return null;
+  const jf = path.join(dir, "xau_state.json");
+  if (!fs.existsSync(jf)) return null;
+  try {
+    return readStateJsonFile(jf)?.bridge_ver ?? null;
+  } catch {
+    return null;
+  }
 }
 
 function stateIsFresh() {
@@ -61,7 +74,7 @@ function installExpert() {
   const destMq5 = path.join(experts, "XauDeskBridge.mq5");
   if (fs.existsSync(srcMq5)) fs.copyFileSync(srcMq5, destMq5);
   else if (fs.existsSync(srcMq5Local)) fs.copyFileSync(srcMq5Local, destMq5);
-  for (const mqhName of ["BridgeRpc.mqh", "TradeExec.mqh"]) {
+  for (const mqhName of ["BridgeRpc.mqh", "TradeExec.mqh", "BridgeState.mqh"]) {
     const mqh = path.join(repoRoot, "mql5/Include", mqhName);
     if (fs.existsSync(mqh)) fs.copyFileSync(mqh, path.join(include, mqhName));
   }
@@ -123,8 +136,25 @@ export async function ensureMt5Bridge({ force = false } = {}) {
   }
   const dir = pickActiveBridgeDir({ freshMs: 120_000 });
   if (dir && stateIsFresh()) persistUserBridgeDir(dir);
-  if (!force && stateIsFresh()) {
-    return { ok: true, action: "already_connected", wine_user: active.wineUser };
+  const bridgeVer = readBridgeVerFromDisk();
+  const verOk = bridgeVerAtLeast(bridgeVer);
+  if (!force && stateIsFresh() && verOk) {
+    return {
+      ok: true,
+      action: "already_connected",
+      wine_user: active.wineUser,
+      bridge_ver: bridgeVer,
+    };
+  }
+  if (!force && stateIsFresh() && !verOk) {
+    return {
+      ok: false,
+      action: "ea_version_stale",
+      bridge_ver: bridgeVer,
+      bridge_ver_required: REQUIRED_BRIDGE_VER,
+      reason: `EA 仍为 bridge_ver ${bridgeVer ?? "?"}，需要 ≥ ${REQUIRED_BRIDGE_VER}。请运行：bash scripts/upgrade-mt5-bridge-mac.sh`,
+      wine_user: active.wineUser,
+    };
   }
   if (!force && recentlyRestarted()) {
     const hint =

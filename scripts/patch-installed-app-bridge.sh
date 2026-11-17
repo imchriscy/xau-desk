@@ -15,6 +15,16 @@ WINE_COMMON="$(node "$ROOT/scripts/print-active-bridge-dir.mjs" 2>/dev/null || t
 WINE_COMMON="${WINE_COMMON:-$HOME/Library/Application Support/net.metaquotes.wine.metatrader5/drive_c/users/user/AppData/Roaming/MetaQuotes/Terminal/Common/Files}"
 
 ditto "$ROOT/gateway-mac" "$GW_DST"
+if [[ -d "$ROOT/dist" ]]; then
+  for DST in \
+    "$APP/Contents/Resources/app/dist" \
+    "$APP/Contents/Resources/app.asar.unpacked/dist" \
+    "$APP/Contents/Resources/dist"; do
+    mkdir -p "$DST"
+    ditto "$ROOT/dist" "$DST"
+    echo "已同步前端 dist → $DST"
+  done
+fi
 mkdir -p "$(dirname "$USER_CFG")"
 mkdir -p "$WINE_COMMON"
 printf '%s\n' "$WINE_COMMON" > "$USER_CFG"

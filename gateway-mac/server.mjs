@@ -9,7 +9,16 @@ import http from "node:http";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { URL } from "node:url";
-import { eaOnline, readFastQuote, readState, rpcToEa, rpcTrade, stateAgeMs } from "./ea-bridge.mjs";
+import {
+  eaOnline,
+  fetchLiveSnapshot,
+  readFastQuote,
+  readState,
+  rpcToEa,
+  rpcTrade,
+  stateAgeMs,
+} from "./ea-bridge.mjs";
+import { REQUIRED_BRIDGE_VER, bridgeVerAtLeast } from "./bridge-version.mjs";
 import { ensureMt5Bridge } from "./ensure-mt5-bridge.mjs";
 import { detectActiveWineUser, mt5ProcessLikelyRunning } from "./wine-profile.mjs";
 import { bridgeDir, rescanBridgeDir } from "./resolve-bridge-dir.mjs";
@@ -107,6 +116,16 @@ function formatEaOfflineDetail(st) {
   );
 }
 
+/** Wine 终端常滞后写 positions[]；保证金已释放时按空仓返回（手机/外部平仓） */
+function reconcilePositionsWithMargin(st, positions) {
+  const rows = Array.isArray(positions) ? positions : [];
+  if (rows.length === 0) return rows;
+  const margin = Number(st?.account?.margin);
+  if (!Number.isFinite(margin)) return rows;
+  if (margin <= 1.5) return [];
+  return rows;
+}
+
 function requireEa(res) {
   const st = readState();
   if (!eaOnline()) {
@@ -168,6 +187,8 @@ const server = http.createServer(async (req, res) => {
         bridge_dir: bridgeDir(),
         bridge_session: online ? st.bridge_session : undefined,
         bridge_ver: st.bridge_ver,
+        bridge_ver_required: REQUIRED_BRIDGE_VER,
+        bridge_ver_ok: bridgeVerAtLeast(st.bridge_ver),
         active_instrument: st.active_instrument,
         state_path: st._path,
         stale_login: online ? undefined : st.account?.login,
@@ -180,7 +201,18 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "POST" && path === "/api/mt5/auto-attach") {
-      const r = await ensureMt5Bridge({ force: false });
+      let force = url.searchParams.get("force") === "1";
+      if (!force) {
+        try {
+          const body = await readBody(req);
+          if (body?.force === true) force = true;
+        } catch {
+          /* empty body */
+        }
+      }
+      const st = readState();
+      const needEa = eaOnline() && !bridgeVerAtLeast(st.bridge_ver);
+      const r = await ensureMt5Bridge({ force: force || needEa });
       json(res, 200, r);
       return;
     }
@@ -252,14 +284,37 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (req.method === "GET" && path === "/api/positions") {
-      const st = requireEa(res);
+      let st = requireEa(res);
       if (!st) return;
       const login = Number(st.account?.login ?? 0);
-      watchPositionsForStreak(login, st.positions || []);
       const symbol = url.searchParams.get("symbol");
       let positions = st.positions || [];
+      positions = reconcilePositionsWithMargin(st, positions);
+      let liveSnap = false;
+      try {
+        const live = await Promise.race([
+          fetchLiveSnapshot(),
+          new Promise((resolve) => setTimeout(() => resolve(null), 600)),
+        ]);
+        if (live?.positions) {
+          positions = live.positions;
+          liveSnap = true;
+          if (live.account) {
+            st = { ...st, account: { ...st.account, ...live.account } };
+          }
+        }
+      } catch {
+        /* 用已 reconcile 的 state 列表 */
+      }
+      positions = reconcilePositionsWithMargin(st, positions);
+      watchPositionsForStreak(login, positions);
       if (symbol) positions = positions.filter((p) => positionMatchesSymbol(p.symbol, symbol));
-      json(res, 200, { positions });
+      const accountMargin = Number(st?.account?.margin);
+      json(res, 200, {
+        positions,
+        live_snapshot: liveSnap,
+        account_margin: Number.isFinite(accountMargin) ? accountMargin : null,
+      });
       return;
     }
 
@@ -268,8 +323,10 @@ const server = http.createServer(async (req, res) => {
       if (!st) return;
       const symbol = url.searchParams.get("symbol");
       let orders = st.orders || [];
+      const live = await fetchLiveSnapshot();
+      if (live?.orders) orders = live.orders;
       if (symbol) orders = orders.filter((o) => positionMatchesSymbol(o.symbol, symbol));
-      json(res, 200, { orders });
+      json(res, 200, { orders, live_snapshot: Boolean(live) });
       return;
     }
 
@@ -581,7 +638,8 @@ server.listen(PORT, HOST, () => {
     const st = readState();
     const stale = stateAgeMs(st);
     const needForce =
-      mt5ProcessLikelyRunning() && stale != null && stale > 60_000 && !eaOnline();
+      (mt5ProcessLikelyRunning() && stale != null && stale > 60_000 && !eaOnline()) ||
+      (eaOnline() && !bridgeVerAtLeast(st.bridge_ver));
     ensureMt5Bridge({ force: needForce })
       .then((r) => console.log("[xau-gateway-mac] ensure", JSON.stringify(r)))
       .catch((e) => console.warn("[xau-gateway-mac] ensure failed", e));

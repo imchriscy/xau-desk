@@ -5,6 +5,7 @@
 #define XAUDESK_BRIDGE_RPC_MQH
 
 #include <TradeExec.mqh>
+#include <BridgeState.mqh>
 
 #define BRIDGE_CMD_FILE  "xau_cmd.json"
 #define BRIDGE_ACK_FILE  "xau_ack.json"
@@ -12,10 +13,12 @@
 #define BRIDGE_TRADE_ACK  "xau_trade_ack.json"
 #define LATENCY_LOG_FILE  "xau_latency.jsonl"
 #define BRIDGE_MAGIC 8805190
+#define BRIDGE_VER_TAG "1.023"
 
 ulong g_latency_ea_us0 = 0;
 string g_latency_trace_id = "";
 bool  g_bridge_latency_log = false;
+bool  g_bridge_snapshot_handled = false;
 
 void BridgeLatencySetEnabled(const bool on) { g_bridge_latency_log = on; }
 
@@ -281,6 +284,19 @@ bool BridgeHandlePayload(const string cmd, const string symbol, const string ack
    string id = BridgeExtractJsonString(cmd, "id");
    string op = BridgeExtractJsonString(cmd, "op");
    if(StringLen(id)==0 || StringLen(op)==0) return false;
+   if(op=="snapshot")
+   {
+      const string body = StringFormat(
+         "{\"positions\":%s,\"orders\":%s,\"account\":{\"margin\":%.2f,\"profit\":%.2f,\"equity\":%.2f}}",
+         BridgeBuildPositionsJson(),
+         BridgeBuildOrdersJson(),
+         AccountInfoDouble(ACCOUNT_MARGIN),
+         AccountInfoDouble(ACCOUNT_PROFIT),
+         AccountInfoDouble(ACCOUNT_EQUITY));
+      BridgeWriteAckFile(ackFile, id, true, body, "");
+      g_bridge_snapshot_handled = true;
+      return true;
+   }
    if(op=="bars")
    {
       string tf = BridgeExtractJsonString(cmd, "timeframe");
@@ -331,6 +347,13 @@ void BridgeProcessCommand(const string symbol)
    if(StringLen(cmd)<3) return;
    BridgeFileDeleteCommon(BRIDGE_CMD_FILE);
    BridgeHandlePayload(cmd, symbol, BRIDGE_ACK_FILE);
+}
+
+bool BridgeConsumeSnapshotFlag()
+{
+   if(!g_bridge_snapshot_handled) return false;
+   g_bridge_snapshot_handled = false;
+   return true;
 }
 
 #endif

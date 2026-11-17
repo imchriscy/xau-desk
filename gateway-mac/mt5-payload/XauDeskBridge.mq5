@@ -2,11 +2,12 @@
 //| XauDeskBridge.mq5 · 写 xau_state.json（打通 XauDesk 连接）       |
 //+------------------------------------------------------------------+
 #property copyright "XauDesk"
-#property version   "1.017"
+#property version   "1.023"
 
 #include <BridgeRpc.mqh>
 
-input int InpRefreshMs = 16;
+input int    InpRefreshMs   = 16;
+input bool   InpLatencyLog  = false;
 
 long   g_last_login = 0;
 string g_last_server = "";
@@ -14,6 +15,8 @@ string g_gold = "";
 string g_last_instrument = "";
 int    g_slow_tick = 0;
 uint   g_block_bars_until = 0;
+int    g_last_positions_total = -1;
+int    g_last_orders_total = -1;
 
 #define ACTIVE_INSTRUMENT_FILE "xau_active_instrument.txt"
 #define SYMBOL_MAP_FILE        "xau_symbol_map.json"
@@ -340,61 +343,11 @@ void WriteState()
    string srv = AccountInfoString(ACCOUNT_SERVER);
    string session = StringFormat("%I64d@%s", login, srv);
 
-   string positions = "[";
-   int pn = 0;
-   for(int i = PositionsTotal() - 1; i >= 0; i--)
-   {
-      ulong ticket = PositionGetTicket(i);
-      if(ticket == 0 || !PositionSelectByTicket(ticket)) continue;
-      string psym = PositionGetString(POSITION_SYMBOL);
-      if(psym != g_gold) continue;
-      string side = (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY) ? "buy" : "sell";
-      double slp = PositionGetDouble(POSITION_SL);
-      double tpp = PositionGetDouble(POSITION_TP);
-      if(pn > 0) positions += ",";
-      positions += StringFormat(
-         "{\"ticket\":%I64u,\"symbol\":\"%s\",\"side\":\"%s\",\"lots\":%.2f,\"open_price\":%.5f,\"sl\":%s,\"tp\":%s,\"profit\":%.2f,\"open_time\":%I64d}",
-         ticket, BridgeJsonEscape(psym), side, PositionGetDouble(POSITION_VOLUME),
-         PositionGetDouble(POSITION_PRICE_OPEN),
-         (slp > 0 ? StringFormat("%.5f", slp) : "null"),
-         (tpp > 0 ? StringFormat("%.5f", tpp) : "null"),
-         PositionGetDouble(POSITION_PROFIT),
-         (long)PositionGetInteger(POSITION_TIME)
-      );
-      pn++;
-   }
-   positions += "]";
-
-   string orders = "[";
-   int on = 0;
-   for(int i = OrdersTotal() - 1; i >= 0; i--)
-   {
-      ulong ot = OrderGetTicket(i);
-      if(ot == 0 || !OrderSelect(ot)) continue;
-      if(OrderGetString(ORDER_SYMBOL) != g_gold) continue;
-      ENUM_ORDER_TYPE typ = (ENUM_ORDER_TYPE)OrderGetInteger(ORDER_TYPE);
-      string oside = (typ==ORDER_TYPE_BUY_LIMIT || typ==ORDER_TYPE_BUY_STOP || typ==ORDER_TYPE_BUY_STOP_LIMIT) ? "buy" : "sell";
-      string omode = "limit";
-      if(typ==ORDER_TYPE_BUY_STOP || typ==ORDER_TYPE_SELL_STOP) omode = "stop";
-      if(typ==ORDER_TYPE_BUY_STOP_LIMIT || typ==ORDER_TYPE_SELL_STOP_LIMIT) omode = "stop_limit";
-      double osl = OrderGetDouble(ORDER_SL);
-      double otp = OrderGetDouble(ORDER_TP);
-      if(on > 0) orders += ",";
-      orders += StringFormat(
-         "{\"ticket\":%I64u,\"symbol\":\"%s\",\"side\":\"%s\",\"mode\":\"%s\",\"lots\":%.2f,\"price\":%.5f,\"sl\":%s,\"tp\":%s,\"setup_time\":%I64d}",
-         ot, BridgeJsonEscape(g_gold), oside, omode,
-         OrderGetDouble(ORDER_VOLUME_CURRENT),
-         OrderGetDouble(ORDER_PRICE_OPEN),
-         (osl > 0 ? StringFormat("%.5f", osl) : "null"),
-         (otp > 0 ? StringFormat("%.5f", otp) : "null"),
-         (long)OrderGetInteger(ORDER_TIME_SETUP)
-      );
-      on++;
-   }
-   orders += "]";
+   string positions = BridgeBuildPositionsJson();
+   string orders = BridgeBuildOrdersJson();
 
    string json = StringFormat(
-      "{\"connected\":true,\"bridge_ver\":\"1.017\",\"ts\":%.0f,\"symbol\":\"%s\",\"active_instrument\":\"%s\","
+      "{\"connected\":true,\"bridge_ver\":\"" BRIDGE_VER_TAG "\",\"ts\":%.0f,\"symbol\":\"%s\",\"active_instrument\":\"%s\","
       "\"bridge_session\":\"%s\","
       "\"quote\":{\"symbol\":\"%s\",\"bid\":%.5f,\"ask\":%.5f,\"last\":%.5f,\"time\":%I64d,\"mt5_ms\":0.1},"
       "\"account\":{\"login\":%I64d,\"server\":\"%s\",\"name\":\"%s\",\"currency\":\"%s\","
@@ -501,13 +454,22 @@ void PumpOnce()
       WriteSymbolMap();
    if((g_slow_tick % 4) == 0)
       WriteState();
-   bool barsBusy = (GetTickCount() < g_block_bars_until) || FileIsExist("xau_trade.json", FILE_COMMON);
-   if(!barsBusy)
-      BridgeProcessCommand(g_gold);
+   int posN = PositionsTotal();
+   int ordN = OrdersTotal();
+   if(posN != g_last_positions_total || ordN != g_last_orders_total)
+   {
+      g_last_positions_total = posN;
+      g_last_orders_total = ordN;
+      WriteState();
+   }
+   BridgeProcessCommand(g_gold);
+   if(BridgeConsumeSnapshotFlag())
+      WriteState();
 }
 
 int OnInit()
 {
+   BridgeLatencySetEnabled(InpLatencyLog);
    RefreshActiveSymbol();
    if(StringLen(g_gold) == 0)
       g_gold = DiscoverGoldSymbol();
@@ -520,7 +482,8 @@ int OnInit()
    }
    WriteSymbolMap();
    WriteState();
-   Print("XauDeskBridge started login=", g_last_login, " srv=", g_last_server,
+   Print("XauDeskBridge started bridge_ver=", BRIDGE_VER_TAG,
+         " login=", g_last_login, " srv=", g_last_server,
          " chart=", _Symbol, " gold=", g_gold);
    return INIT_SUCCEEDED;
 }
@@ -530,3 +493,16 @@ void OnDeinit(const int reason) { EventKillTimer(); }
 void OnTick() { BridgeProcessTrade(g_gold); }
 
 void OnTimer() { PumpOnce(); }
+
+void OnTradeTransaction(const MqlTradeTransaction &trans,
+                          const MqlTradeRequest &request,
+                          const MqlTradeResult &result)
+{
+   if(trans.type == TRADE_TRANSACTION_DEAL_ADD ||
+      trans.type == TRADE_TRANSACTION_POSITION ||
+      trans.type == TRADE_TRANSACTION_ORDER_ADD ||
+      trans.type == TRADE_TRANSACTION_ORDER_DELETE ||
+      trans.type == TRADE_TRANSACTION_ORDER_UPDATE ||
+      trans.type == TRADE_TRANSACTION_HISTORY_ADD)
+      WriteState();
+}

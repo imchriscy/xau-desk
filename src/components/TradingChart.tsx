@@ -14,11 +14,14 @@ import {
 
   type ISeriesApi,
 
+  type ITimeScaleApi,
+
   type Time,
 
 } from "lightweight-charts";
 
 import { coerceCandleTime, normalizeCandles } from "../candleTime";
+import type { TradeInstrumentId } from "../instruments";
 import type {
   Candle,
   ChartTradeOverlay,
@@ -150,6 +153,28 @@ function latestVisibleLogicalRange(barCount: number, tf: Timeframe): { from: num
   };
 }
 
+/** setData 后对齐最新（换周期/品种）；仅补一次 rAF，避免交易中多次抢视口 */
+function applyLatestVisibleRange(ts: ITimeScaleApi<Time>, barCount: number, tf: Timeframe) {
+  const range = latestVisibleLogicalRange(barCount, tf);
+  ts.setVisibleLogicalRange(range);
+  requestAnimationFrame(() => ts.setVisibleLogicalRange(range));
+}
+
+function clampLogicalRange(
+  range: { from: number; to: number },
+  barCount: number,
+): { from: number; to: number } {
+  const maxTo = Math.max(0, barCount) + RIGHT_BAR_GAP;
+  const span = Math.max(20, range.to - range.from);
+  let to = Math.min(range.to, maxTo);
+  let from = to - span;
+  if (from < 0) {
+    from = 0;
+    to = Math.min(maxTo, span);
+  }
+  return { from, to };
+}
+
 /** 限制末根 K 线异常影线，防止 tick 脏数据把 autoscale 越撑越大 */
 function clampLastBarWicks(c: Candle, maxWick = 120): Candle {
   const capHigh = Math.max(c.open, c.close) + maxWick;
@@ -177,6 +202,9 @@ interface Props {
   candles: Candle[];
 
   timeframe: Timeframe;
+
+  /** 切换品种时对齐最新 K（与点「最新」一致） */
+  instrumentId?: TradeInstrumentId;
 
   overlays: ChartTradeOverlay[];
 
@@ -243,6 +271,7 @@ const TradingChart = forwardRef<TradingChartHandle, Props>(function TradingChart
   {
     candles,
     timeframe,
+    instrumentId = "xau",
     overlays,
     markPrice,
     bid = null,
@@ -299,6 +328,7 @@ const TradingChart = forwardRef<TradingChartHandle, Props>(function TradingChart
   const prevFirstTimeRef = useRef<number | null>(null);
   /** 用户拖离最新 K 后保持视口，直至点「最新」 */
   const userViewPinnedRef = useRef(false);
+  const prevInstRef = useRef(instrumentId);
 
   const [dragHint, setDragHint] = useState<string | null>(null);
   const posLabelRefs = useRef<Map<string, HTMLDivElement>>(new Map());
@@ -366,7 +396,7 @@ const TradingChart = forwardRef<TradingChartHandle, Props>(function TradingChart
     if (!chart || clean.length === 0) return;
 
     userViewPinnedRef.current = false;
-    chart.timeScale().setVisibleLogicalRange(latestVisibleLogicalRange(clean.length, tf));
+    applyLatestVisibleRange(chart.timeScale(), clean.length, tf);
 
   };
 
@@ -425,9 +455,7 @@ const TradingChart = forwardRef<TradingChartHandle, Props>(function TradingChart
     const clean = dedupe(candlesRef.current);
     if (!chart || clean.length === 0) return;
     userViewPinnedRef.current = false;
-    chart.timeScale().setVisibleLogicalRange(
-      latestVisibleLogicalRange(clean.length, timeframeRef.current),
-    );
+    applyLatestVisibleRange(chart.timeScale(), clean.length, timeframeRef.current);
   };
 
   useImperativeHandle(ref, () => ({
@@ -918,6 +946,7 @@ const TradingChart = forwardRef<TradingChartHandle, Props>(function TradingChart
     };
 
     const tfChanged = prevTfRef.current !== timeframe;
+    const instChanged = prevInstRef.current !== instrumentId;
     const sameAnchor =
       !tfChanged &&
       prevFirstTimeRef.current != null &&
@@ -947,40 +976,43 @@ const TradingChart = forwardRef<TradingChartHandle, Props>(function TradingChart
       const ts = chart.timeScale();
       const prevRange = ts.getVisibleLogicalRange();
       series.setData(barsForChart.map(toBar));
-      const sec = TF_SECONDS[timeframe];
-      ts.applyOptions({
-        barSpacing: timeframe === "1m" ? 5 : 7,
-        secondsVisible: sec < 3600,
-      });
-      const snapLatest = () => {
-        ts.setVisibleLogicalRange(latestVisibleLogicalRange(clean.length, timeframe));
-      };
-      const pinned = userViewPinnedRef.current;
       if (tfChanged) {
-        snapLatest();
+        const sec = TF_SECONDS[timeframe];
+        ts.applyOptions({
+          barSpacing: timeframe === "1m" ? 5 : 7,
+          secondsVisible: sec < 3600,
+        });
+      }
+      const pinned = userViewPinnedRef.current;
+      if (tfChanged || instChanged) {
+        userViewPinnedRef.current = false;
+        applyLatestVisibleRange(ts, clean.length, timeframe);
       } else if (!prevRange) {
-        snapLatest();
-      } else {
+        applyLatestVisibleRange(ts, clean.length, timeframe);
+      } else if (!pinned) {
         const added =
           prevLenRef.current > 0 && clean.length > prevLenRef.current
             ? clean.length - prevLenRef.current
             : 0;
         const atLive = prevRange.to >= prevLenRef.current - 1.5;
-        if (added > 0 && !pinned && atLive) {
+        if (added > 0 && atLive) {
           ts.setVisibleLogicalRange({ from: prevRange.from + added, to: prevRange.to + added });
         } else {
-          ts.setVisibleLogicalRange(prevRange);
+          ts.setVisibleLogicalRange(clampLogicalRange(prevRange, clean.length));
         }
+      } else {
+        ts.setVisibleLogicalRange(clampLogicalRange(prevRange, clean.length));
       }
     }
 
     prevTfRef.current = timeframe;
+    prevInstRef.current = instrumentId;
     prevLenRef.current = clean.length;
     prevFirstTimeRef.current = clean.length ? clean[0].time : null;
 
     const last = clean[clean.length - 1];
     onLastPrice(last.close);
-  }, [candles, timeframe, onLastPrice]);
+  }, [candles, timeframe, instrumentId, onLastPrice]);
 
   useEffect(() => {
     const chart = chartRef.current;

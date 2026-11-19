@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 
 import TradingChart, { type TradingChartHandle } from "./components/TradingChart";
 
@@ -9,7 +10,7 @@ import PositionsPanel from "./components/PositionsPanel";
 import SettingsModal from "./components/SettingsModal";
 import RiskHud from "./components/RiskHud";
 import RiskPanel from "./components/RiskPanel";
-import DailyHardRiskPanel from "./components/DailyHardRiskPanel";
+import DailyHardRiskModal from "./components/DailyHardRiskModal";
 import StreakOrdinanceModal from "./components/StreakOrdinanceModal";
 import { useStreakOrdinanceAlert } from "./hooks/useStreakOrdinanceAlert";
 import ChartToolbars from "./components/ChartToolbars";
@@ -18,13 +19,14 @@ import Mt5ConnectBanner from "./components/Mt5ConnectBanner";
 import { buildIndicatorRenderPlans } from "./chartIndicators";
 import { loadStoredChartUi, saveStoredChartUi } from "./chartIndicatorStorage";
 import { fetchBars } from "./api/mt5";
-import { generateMockCandles } from "./mockData";
+import { ALL_TIMEFRAMES, generateMockCandles } from "./mockData";
 import InstrumentPicker from "./components/InstrumentPicker";
 import {
   STORAGE_INSTRUMENT_KEY,
   TRADE_INSTRUMENTS,
   formatPrice,
   instrumentById,
+  symbolMatchesInstrument,
   type TradeInstrumentId,
 } from "./instruments";
 import { symbolsMatch } from "./lib/goldSymbol";
@@ -39,6 +41,8 @@ import {
   modifyMt5Order,
   modifyMt5Position,
   sendMarketOrder,
+  fetchMt5Positions,
+  type Mt5PositionRow,
   fetchGatewayVersion,
   gatewayVersionHint,
   sendPendingOrder,
@@ -70,6 +74,71 @@ import type {
   Timeframe,
 } from "./types";
 
+const INSTRUMENT_IDS: TradeInstrumentId[] = ["xau", "nas100", "btc"];
+
+function inferInstrumentId(sym: string | undefined, fallback: TradeInstrumentId): TradeInstrumentId {
+  if (!sym) return fallback;
+  for (const id of INSTRUMENT_IDS) {
+    if (symbolMatchesInstrument(sym, id)) return id;
+  }
+  return fallback;
+}
+
+function parseSessionLogin(session: string | null | undefined): number | null {
+  if (!session) return null;
+  const n = Number(String(session).split("@")[0]);
+  return Number.isFinite(n) ? n : null;
+}
+
+function mt5RowToPosition(r: Mt5PositionRow, tradeInstrument: TradeInstrumentId): Position {
+  return {
+    id: `mt5-${r.ticket}`,
+    ticket: r.ticket,
+    side: r.side,
+    lots: r.lots,
+    openPrice: r.open_price,
+    sl: r.sl,
+    tp: r.tp,
+    openTime: r.open_time,
+    profitUsd: r.profit,
+    symbol: r.symbol,
+    instrumentId: inferInstrumentId(r.symbol, tradeInstrument),
+  };
+}
+
+function newestFillTicket(
+  rows: Mt5PositionRow[],
+  side: OrderSide,
+  symbol?: string,
+): number | undefined {
+  let list = rows;
+  if (symbol) {
+    const narrowed = rows.filter((r) => !r.symbol || symbolsMatch(r.symbol, symbol));
+    if (narrowed.length) list = narrowed;
+  }
+  const sorted = [...list].sort(
+    (a, b) => b.open_time - a.open_time || b.ticket - a.ticket,
+  );
+  const hit = sorted.find((r) => r.side === side) ?? sorted[0];
+  return hit?.ticket;
+}
+
+function positionVisibleForInstrument(
+  p: Position,
+  tradeInstrument: TradeInstrumentId,
+  sym: string,
+): boolean {
+  if (p.instrumentId === tradeInstrument) return true;
+  const inst = instrumentById(tradeInstrument);
+  const allow = new Set([sym, inst.short, ...inst.candidates].filter(Boolean) as string[]);
+  return (
+    !p.symbol ||
+    allow.has(p.symbol) ||
+    symbolMatchesInstrument(p.symbol, tradeInstrument) ||
+    (sym ? symbolsMatch(p.symbol, sym) : false)
+  );
+}
+
 function migrateChartIndicators(raw: ChartIndicatorInst[]): ChartIndicatorInst[] {
   const list = raw.map((i) => ({
     ...i,
@@ -91,8 +160,6 @@ import "./styles/global.css";
 import "./styles/chart-analysis.css";
 
 
-
-const TIMEFRAMES: Timeframe[] = ["1m", "3m", "5m", "15m", "30m", "1h", "4h", "1d"];
 
 function hitChartWrap(clientX: number, clientY: number, wrap: HTMLElement | null): boolean {
   if (!wrap) return false;
@@ -179,6 +246,7 @@ export default function App() {
   const [settings, setSettings] = useState<AppSettings>(() => loadSettings());
 
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [mt5ConnectHintOpen, setMt5ConnectHintOpen] = useState(true);
   const [riskOpen, setRiskOpen] = useState(false);
   const [dailyHardRiskOpen, setDailyHardRiskOpen] = useState(false);
   const [drawTool, setDrawTool] = useState<DrawToolKind>(null);
@@ -202,14 +270,21 @@ export default function App() {
   const [accountEpoch, setAccountEpoch] = useState(0);
 
   const [posSyncTick, setPosSyncTick] = useState(0);
+  /** UI 真源：成交 ack 写入 + 轮询仅在非空时合并，空响应不删仓 */
+  const [displayPositions, setDisplayPositions] = useState<Position[]>([]);
+  const marketOrderBusyRef = useRef(false);
+  const marketOrderBusyTimerRef = useRef<number | null>(null);
+  /** 成交后短时内 poll 不得往列表塞新 ticket（只允许刷新已有行的价/盈亏） */
+  const marketOrderMuteUntilRef = useRef(0);
+  const closingTicketsRef = useRef<Set<number>>(new Set());
+  /** 已平仓 ticket：陈旧 poll/snapshot 不得写回 */
+  const dismissedTicketsRef = useRef<Set<number>>(new Set());
+  const positionsBootstrappedLoginRef = useRef<number | null>(null);
   const accountFinRef = useRef<string | null>(null);
 
   const chartRef = useRef<TradingChartHandle>(null);
-  const pendingTfScrollRef = useRef<Timeframe | null>(null);
-
   const onTimeframe = useCallback((tf: Timeframe) => {
     if (tf === timeframe) return;
-    pendingTfScrollRef.current = tf;
     setTimeframe(tf);
   }, [timeframe]);
 
@@ -233,31 +308,47 @@ export default function App() {
     setTradeInstrument(id);
     const inst = instrumentById(id);
     setForm((f) => ({ ...f, slOffset: inst.defaultSlOffset, tpOffset: inst.defaultTpOffset }));
-    setOptimisticPos([]);
-    setHiddenTickets([]);
+    setDisplayPositions([]);
+    closingTicketsRef.current.clear();
+    dismissedTicketsRef.current.clear();
+    positionsBootstrappedLoginRef.current = null;
     try {
       localStorage.setItem(STORAGE_INSTRUMENT_KEY, id);
     } catch {
       /* */
     }
-    setDataEpoch((n) => n + 1);
     setPosSyncTick((n) => n + 1);
     setOrderSyncTick((n) => n + 1);
     setFlash(`已切换 ${inst.label}，等待 MT5 行情…`);
   }, []);
 
   const onMt5SessionChange = useCallback((session: string, prev: string | null) => {
-    setFlash(`MT5 已切换 ${prev ?? "?"} → ${session}`);
-    setAccountEpoch((n) => n + 1);
-    setDataEpoch((n) => n + 1);
-    setPosSyncTick((n) => n + 1);
-    setOrderSyncTick((n) => n + 1);
+    const prevLogin = parseSessionLogin(prev);
+    const nextLogin = parseSessionLogin(session);
+    const loginChanged =
+      prevLogin != null && nextLogin != null && prevLogin !== nextLogin;
+    if (loginChanged) {
+      setFlash(`MT5 已切换账户 ${prevLogin} → ${nextLogin}`);
+      setDisplayPositions([]);
+      closingTicketsRef.current.clear();
+      dismissedTicketsRef.current.clear();
+      positionsBootstrappedLoginRef.current = null;
+      setAccountEpoch((n) => n + 1);
+      setDataEpoch((n) => n + 1);
+      setPosSyncTick((n) => n + 1);
+      setOrderSyncTick((n) => n + 1);
+    }
   }, []);
 
   const { account, error: accountError, reload: reloadAccount, statusMeta } = useMt5Account(
     dataEpoch + accountEpoch,
     onMt5SessionChange,
   );
+
+  useEffect(() => {
+    if (account) setMt5ConnectHintOpen(false);
+  }, [account]);
+
   const { status: riskStatus } = useRiskStatus(market.connected, account?.login);
   const streakOrdinanceAlert = useStreakOrdinanceAlert(riskStatus);
 
@@ -281,63 +372,124 @@ export default function App() {
   }, [riskStatus?.halted]);
 
   const executeOnMt5 = shouldExecuteOnMt5(account);
+  const mt5Positions = useMt5PositionsSync(executeOnMt5 || displayPositions.length > 0, "", posSyncTick);
 
-  const mt5Positions = useMt5PositionsSync(
-    executeOnMt5,
-    "",
-    posSyncTick,
-    account?.margin,
-  );
+  const mt5Live = executeOnMt5 || displayPositions.length > 0;
+
+  useEffect(() => {
+    if (!mt5Positions.length || marketOrderBusyRef.current) return;
+    const sym = market.symbol;
+    const closing = closingTicketsRef.current;
+    const dismissed = dismissedTicketsRef.current;
+    const muteNew = Date.now() < marketOrderMuteUntilRef.current;
+    setDisplayPositions((prev) => {
+      const map = new Map(prev.map((p) => [p.ticket, p]));
+      let touched = false;
+      for (const live of mt5Positions) {
+        if (closing.has(live.ticket) || dismissed.has(live.ticket)) continue;
+        const existing = map.get(live.ticket);
+        if (!existing && muteNew) continue;
+        const instrumentId =
+          existing?.instrumentId ?? inferInstrumentId(live.symbol, tradeInstrument);
+        const candidate: Position = { ...live, instrumentId };
+        if (!existing && !positionVisibleForInstrument(candidate, tradeInstrument, sym)) {
+          continue;
+        }
+        if (existing) {
+          touched = true;
+          map.set(live.ticket, {
+            ...existing,
+            openPrice: live.openPrice,
+            lots: live.lots,
+            sl: live.sl,
+            tp: live.tp,
+            profitUsd: live.profitUsd,
+          });
+        } else {
+          touched = true;
+          map.set(live.ticket, candidate);
+        }
+      }
+      return touched ? [...map.values()] : prev;
+    });
+  }, [mt5Positions, tradeInstrument, market.symbol]);
+
   const mt5Pending = useMt5OrdersSync(executeOnMt5, market.symbol, orderSyncTick);
   const pending = executeOnMt5 ? mt5Pending : [];
 
-  const [optimisticPos, setOptimisticPos] = useState<Position[]>([]);
-  const [hiddenTickets, setHiddenTickets] = useState<number[]>([]);
+  useEffect(() => {
+    if (!executeOnMt5 || !account?.login) return;
+    if (positionsBootstrappedLoginRef.current === account.login) return;
+    positionsBootstrappedLoginRef.current = account.login;
+    let cancelled = false;
+    void fetchMt5Positions(undefined, { snapshot: true }).then((rows) => {
+      if (cancelled || rows.length === 0) return;
+      setDisplayPositions((prev) => {
+        const dismissed = dismissedTicketsRef.current;
+        const map = new Map(prev.map((p) => [p.ticket, p]));
+        for (const r of rows) {
+          if (dismissed.has(r.ticket)) continue;
+          const pos = mt5RowToPosition(r, tradeInstrument);
+          map.set(r.ticket, pos);
+        }
+        return [...map.values()];
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [executeOnMt5, account?.login, tradeInstrument]);
 
-  const flatByMargin =
-    executeOnMt5 && account != null && account.margin <= 1.5;
-  const positions = executeOnMt5
-    ? flatByMargin
-      ? []
-      : [
-          ...mt5Positions.filter((p) => !hiddenTickets.includes(p.ticket)),
-          ...optimisticPos.filter(
-            (p) =>
-              !hiddenTickets.includes(p.ticket) &&
-              !mt5Positions.some((m) => m.ticket === p.ticket),
-          ),
-        ]
-    : paperPositions;
+  const mergeMt5RowsIntoDisplay = useCallback(
+    (rows: Mt5PositionRow[]) => {
+      if (!rows.length) return;
+      const dismissed = dismissedTicketsRef.current;
+      setDisplayPositions((prev) => {
+        const map = new Map(prev.map((p) => [p.ticket, p]));
+        for (const r of rows) {
+          if (dismissed.has(r.ticket)) continue;
+          const pos = mt5RowToPosition(r, tradeInstrument);
+          map.set(pos.ticket, pos);
+        }
+        return [...map.values()];
+      });
+    },
+    [tradeInstrument],
+  );
+
+  useEffect(() => {
+    if (!executeOnMt5 || posSyncTick === 0) return;
+    let cancelled = false;
+    const t = window.setTimeout(() => {
+      void fetchMt5Positions(undefined, { snapshot: true }).then((rows) => {
+        if (cancelled || rows.length === 0) return;
+        mergeMt5RowsIntoDisplay(rows);
+      });
+    }, 500);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [posSyncTick, executeOnMt5, tradeInstrument, mergeMt5RowsIntoDisplay]);
+
+  const positions = mt5Live ? displayPositions : paperPositions;
 
   const positionsForInstrument = useMemo(() => {
     const sym = market.symbol;
-    let list = sym
-      ? positions.filter((p) => !p.symbol || symbolsMatch(p.symbol, sym))
-      : positions;
-    if (executeOnMt5 && account && account.margin <= 1.5 && list.length > 0) {
-      list = [];
-    }
-    return list;
-  }, [positions, market.symbol, executeOnMt5, account?.margin]);
+    return positions.filter(
+      (p) =>
+        p.instrumentId === tradeInstrument ||
+        positionVisibleForInstrument(p, tradeInstrument, sym),
+    );
+  }, [positions, market.symbol, tradeInstrument]);
 
   useEffect(() => {
-    const live = new Set(mt5Positions.map((p) => p.ticket));
-    const margin = account?.margin;
-    setOptimisticPos((list) => {
-      if (list.length === 0) return list;
-      if (live.size === 0 && margin != null && margin <= 1.5) return [];
-      return list.filter((p) => !live.has(p.ticket));
-    });
-    setHiddenTickets((list) => list.filter((t) => live.has(t)));
-  }, [mt5Positions, account?.margin]);
-
-  useEffect(() => {
-    if (positionsForInstrument.length > 0) return;
+    if (positions.length > 0) return;
     const sel = selectedIdRef.current;
     if (sel && (sel.startsWith("mt5-") || sel.startsWith("mt5-order-"))) {
       setSelectedId(null);
     }
-  }, [positionsForInstrument.length]);
+  }, [positions.length]);
 
   const positionsRef = useRef(positionsForInstrument);
   const pendingRef = useRef(pending);
@@ -353,7 +505,12 @@ export default function App() {
   const { reload: reloadBars } = market;
 
   const candles = market.candles;
-  const lastPrice = market.lastPrice;
+  const lastPrice = useMemo(() => {
+    if (candles.length > 0) return candles[candles.length - 1]!.close;
+    if (market.bid != null && Number.isFinite(market.bid)) return market.bid;
+    if (market.ask != null && Number.isFinite(market.ask)) return market.ask;
+    return market.lastPrice;
+  }, [candles, market.bid, market.ask, market.lastPrice]);
 
   useEffect(() => {
     saveStoredChartUi({ indicators: chartIndicators, drawings: chartDrawings });
@@ -436,21 +593,6 @@ export default function App() {
     queueMicrotask(() => chartRef.current?.resetVisibleRange());
   }, [reloadBars]);
 
-  useEffect(() => {
-    if (pendingTfScrollRef.current !== timeframe) return;
-    if (market.loadingTf || candles.length === 0) return;
-    pendingTfScrollRef.current = null;
-    const scroll = () => chartRef.current?.scrollToLatest();
-    const raf1 = requestAnimationFrame(() => {
-      requestAnimationFrame(scroll);
-    });
-    const t = window.setTimeout(scroll, 80);
-    return () => {
-      cancelAnimationFrame(raf1);
-      window.clearTimeout(t);
-    };
-  }, [timeframe, market.loadingTf, candles.length]);
-
   const prevClose = candles.length > 2 ? candles[candles.length - 2].close : lastPrice;
 
   const chg = lastPrice - prevClose;
@@ -468,14 +610,7 @@ export default function App() {
 
   useEffect(() => {
     if (!account || !executeOnMt5) return;
-    const fin = `${account.equity.toFixed(2)}|${account.profit.toFixed(2)}|${account.margin.toFixed(2)}`;
-    const prev = accountFinRef.current;
-    if (prev && prev !== fin) {
-      setPosSyncTick((n) => n + 1);
-      setOptimisticPos([]);
-      if (account.margin <= 1.5) setHiddenTickets([]);
-    }
-    accountFinRef.current = fin;
+    accountFinRef.current = `${account.equity.toFixed(2)}|${account.profit.toFixed(2)}|${account.margin.toFixed(2)}`;
   }, [account, executeOnMt5]);
 
   // 仅在市场事件（成交/改单/平仓）时默认选中最新单；轮询刷新持仓列表不得抢用户当前选中
@@ -756,11 +891,40 @@ export default function App() {
 
 
 
-  const closingTicketsRef = useRef<Set<number>>(new Set());
+  const closeChainRef = useRef(Promise.resolve());
+  const closingSnapshotRef = useRef<Map<number, Position>>(new Map());
+
+  function isAlreadyClosedMsg(msg: string): boolean {
+    const m = msg.toLowerCase();
+    return (
+      m.includes("no pos") ||
+      m.includes("no position") ||
+      m.includes("not found") ||
+      m.includes("没有找到") ||
+      m.includes("已平")
+    );
+  }
   const buySeqRef = useRef(0);
+  const accountRef = useRef(account);
+  const reloadAccountDebouncedRef = useRef<number | null>(null);
+  accountRef.current = account;
+
+  const scheduleAccountReload = useCallback(() => {
+    if (reloadAccountDebouncedRef.current) {
+      clearTimeout(reloadAccountDebouncedRef.current);
+    }
+    reloadAccountDebouncedRef.current = window.setTimeout(() => {
+      reloadAccountDebouncedRef.current = null;
+      void reloadAccount();
+    }, 900);
+  }, [reloadAccount]);
 
   const submitOrder = useCallback(
     async (side: OrderSide) => {
+      if (marketOrderBusyRef.current) {
+        setFlash("上一笔市价单还在提交，请稍候");
+        return;
+      }
       if (riskStatus?.halted) {
         setFlash(
           riskStatus.halt_reason ??
@@ -775,7 +939,8 @@ export default function App() {
         setFlash("图形挂单请拖卡片到 K 线松手");
         return;
       }
-      if (!account) {
+      const acct = accountRef.current;
+      if (!acct && displayPositions.length === 0) {
         setFlash("未读取 MT5 账户：请打开 MT5 并运行 restart-backend.cmd");
         return;
       }
@@ -788,7 +953,17 @@ export default function App() {
         inst.digits,
       );
       const seq = ++buySeqRef.current;
-      setFlash(`${side === "buy" ? "买入" : "卖出"} #${seq} 已排队`);
+      if (marketOrderBusyTimerRef.current) {
+        clearTimeout(marketOrderBusyTimerRef.current);
+        marketOrderBusyTimerRef.current = null;
+      }
+      marketOrderMuteUntilRef.current = Date.now() + 4500;
+      marketOrderBusyRef.current = true;
+      const instSym =
+        market.symbol ||
+        instrumentById(tradeInstrument).candidates[0] ||
+        instrumentById(tradeInstrument).short;
+      setFlash(`${side === "buy" ? "买入" : "卖出"} #${seq} 提交中…`);
       try {
         const res = await sendMarketOrder({
           side,
@@ -797,71 +972,127 @@ export default function App() {
           sl: f.slOffset > 0 ? sl : null,
           tp: f.tpOffset > 0 ? tp : null,
           allow_demo_mt5: true,
+          ui_t0_ms: performance.now(),
         });
         if (!res.ok) {
           setFlash(`${side === "buy" ? "买" : "卖"} #${seq} 被拒`);
           return;
         }
-        if (res.ticket) {
+        let ticket = res.ticket;
+        const fillSymbol = res.symbol || instSym;
+        if (!ticket) {
+          try {
+            const rows = await fetchMt5Positions(undefined, { snapshot: true });
+            ticket = newestFillTicket(rows, side, market.symbol || fillSymbol);
+            if (rows.length > 0) mergeMt5RowsIntoDisplay(rows);
+          } catch {
+            /* 仍走下方 ack 合成 */
+          }
+        }
+        if (ticket) {
           const px =
             res.price ??
             (side === "buy" ? market.ask : market.bid) ??
             lastPrice;
-          const id = `mt5-${res.ticket}`;
-          setOptimisticPos((list) => [
-            ...list.filter((p) => p.ticket !== res.ticket),
-            {
-              id,
-              ticket: res.ticket!,
-              side,
-              lots: f.lots,
-              openPrice: px,
-              sl: f.slOffset > 0 ? sl : null,
-              tp: f.tpOffset > 0 ? tp : null,
-              openTime: Date.now() / 1000,
-              symbol: market.symbol,
-            },
-          ]);
-          setSelectedId(id);
+          const next: Position = {
+            id: `mt5-${ticket}`,
+            ticket,
+            side: res.side ?? side,
+            lots: res.lots ?? f.lots,
+            openPrice: px,
+            sl: f.slOffset > 0 ? sl : null,
+            tp: f.tpOffset > 0 ? tp : null,
+            openTime: Date.now() / 1000,
+            symbol: fillSymbol,
+            instrumentId: tradeInstrument,
+          };
+          flushSync(() => {
+            setDisplayPositions((prev) => {
+              const map = new Map(prev.map((p) => [p.ticket, p]));
+              map.set(ticket, next);
+              return [...map.values()];
+            });
+            setSelectedId(next.id);
+          });
+          setFlash(`${side === "buy" ? "买" : "卖"} #${seq} 已成交`);
+        } else {
+          setFlash(`${side === "buy" ? "买" : "卖"} #${seq} 已成交（正在拉持仓…）`);
         }
-        setPosSyncTick((n) => n + 1);
-        void reloadAccount();
-        setFlash(`${side === "buy" ? "买" : "卖"} #${seq} 已成交`);
+        void fetchMt5Positions(undefined, { snapshot: true }).then((rows) => {
+          if (rows.length > 0) mergeMt5RowsIntoDisplay(rows);
+        });
+        window.setTimeout(() => setPosSyncTick((n) => n + 1), 600);
+        scheduleAccountReload();
       } catch (e) {
         setFlash(`#${seq} ${e instanceof Error ? e.message : String(e)}`);
+      } finally {
+        if (marketOrderBusyTimerRef.current) {
+          clearTimeout(marketOrderBusyTimerRef.current);
+        }
+        marketOrderBusyTimerRef.current = window.setTimeout(() => {
+          marketOrderBusyRef.current = false;
+          marketOrderBusyTimerRef.current = null;
+        }, 800);
       }
     },
-    [account, lastPrice, market.ask, market.bid, reloadAccount, riskStatus, tradeInstrument],
+    [
+      lastPrice,
+      market.ask,
+      market.bid,
+      market.symbol,
+      riskStatus,
+      scheduleAccountReload,
+      tradeInstrument,
+      mergeMt5RowsIntoDisplay,
+    ],
   );
 
   const closePositionById = useCallback((id: string) => {
     const p = positionsRef.current.find((x) => x.id === id);
     if (!p) return;
     if (closingTicketsRef.current.has(p.ticket)) {
-      setFlash(`#${p.ticket} 已在平仓队列`);
       return;
     }
     if (executeOnMt5Ref.current) {
-      closingTicketsRef.current.add(p.ticket);
-      setHiddenTickets((list) => (list.includes(p.ticket) ? list : [...list, p.ticket]));
-      const rest = positionsRef.current.filter(
-        (x) => x.id !== id && !closingTicketsRef.current.has(x.ticket),
-      );
-      if (selectedIdRef.current === id) setSelectedId(rest[0]?.id ?? null);
-      setFlash(`平仓 #${p.ticket} 已排队`);
-      void closeMt5Position(p.ticket)
-        .then(() => {
-          closingTicketsRef.current.delete(p.ticket);
-          setHiddenTickets((list) => list.filter((t) => t !== p.ticket));
-          setOptimisticPos((list) => list.filter((x) => x.ticket !== p.ticket));
+      const ticket = p.ticket;
+      const side = p.side;
+      const lots = p.lots;
+      closingTicketsRef.current.add(ticket);
+      dismissedTicketsRef.current.add(ticket);
+      closingSnapshotRef.current.set(ticket, p);
+      setDisplayPositions((prev) => prev.filter((x) => x.ticket !== ticket));
+      const restForSel = positionsRef.current.filter((x) => x.id !== id);
+      const nextSel = restForSel.sort((a, b) => b.openTime - a.openTime)[0];
+      if (selectedIdRef.current === id) setSelectedId(nextSel?.id ?? null);
+
+      setFlash(`平仓 #${ticket} 提交中…`);
+      const run = async () => {
+        try {
+          await closeMt5Position(ticket);
           setPosSyncTick((n) => n + 1);
-          setFlash(`已平仓 #${p.ticket} · ${p.side.toUpperCase()} ${p.lots}`);
-        })
-        .catch((e) => {
-          closingTicketsRef.current.delete(p.ticket);
-          setHiddenTickets((list) => list.filter((t) => t !== p.ticket));
-          setFlash(e instanceof Error ? e.message : String(e));
-        });
+          setFlash(`已平仓 #${ticket} · ${side.toUpperCase()} ${lots}`);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          if (!isAlreadyClosedMsg(msg)) {
+            const snap = closingSnapshotRef.current.get(ticket);
+            dismissedTicketsRef.current.delete(ticket);
+            if (snap) {
+              setDisplayPositions((prev) => {
+                if (prev.some((x) => x.ticket === ticket)) return prev;
+                return [...prev, snap];
+              });
+            }
+            setPosSyncTick((n) => n + 1);
+            setFlash(msg);
+            return;
+          }
+          setFlash(`#${ticket} 已平仓`);
+        } finally {
+          closingTicketsRef.current.delete(ticket);
+          closingSnapshotRef.current.delete(ticket);
+        }
+      };
+      closeChainRef.current = closeChainRef.current.then(run, run);
     } else {
       setPaperPositions((list) => list.filter((x) => x.id !== id));
       setFlash("已平仓");
@@ -1209,13 +1440,16 @@ export default function App() {
       } else if (e.key === "x" || e.key === "X") {
         e.preventDefault();
         if (e.repeat) return;
-        const sel = selectedIdRef.current;
-        const hit = sel && positionsRef.current.some((p) => p.id === sel);
-        if (!hit) {
-          setFlash("请先点选要平的持仓，X 只平当前选中的那笔");
+        const list = positionsRef.current;
+        if (list.length === 0) {
+          setFlash("当前无持仓可平");
           return;
         }
-        closePositionById(sel);
+        const sel = selectedIdRef.current;
+        const hit = sel && list.some((p) => p.id === sel);
+        const id =
+          hit ? sel : [...list].sort((a, b) => b.openTime - a.openTime)[0]!.id;
+        closePositionById(id);
       } else if (e.key === "Escape") {
         if (slTpEditor) {
           setSlTpEditor(null);
@@ -1282,30 +1516,9 @@ export default function App() {
                 {chgPct.toFixed(2)}%)
               </span>
             )}
-          </div>
-          <div className="top-bar-meta-row">
-            {account ? (
-              <span className="top-stat-slot meta acct-mini">
-                #{account.login} · {account.server} · 净值 {account.equity.toFixed(2)} {account.currency} · 余额{" "}
-                {account.balance.toFixed(2)}
-              </span>
-            ) : null}
             {market.symbol && statusMeta?.symbol && !symbolsMatch(market.symbol, statusMeta.symbol) ? (
-              <span className="meta chart-error" title="EA 正在切换品种，约 1 秒内应一致">
+              <span className="meta top-sync-warn" title="EA 正在切换品种，约 1 秒内应一致">
                 同步中：{market.symbol} / 桥 {statusMeta.symbol}
-              </span>
-            ) : null}
-            {account && dailyPnlUsd != null ? (
-              <span
-                className={`top-stat-slot daily-pnl-chip ${dailyPnlUsd >= 0 ? "up" : "down"}`}
-                title={
-                  riskStatus?.config.baseline_equity != null
-                    ? "相对日风控基准净值（北京 06:00 交易窗）"
-                    : "未锁基准：当前为净值减余额（主要为持仓浮动）"
-                }
-              >
-                当日盈亏：{dailyPnlUsd >= 0 ? "+" : ""}
-                {dailyPnlUsd.toFixed(1)} {account.currency}
               </span>
             ) : null}
           </div>
@@ -1341,15 +1554,15 @@ export default function App() {
 
           </span>
 
-          <span className={`chip mt5-conn ${executeOnMt5 ? "ok" : "bad"}`}>
-            {executeOnMt5 ? "MT5 直连" : "MT5 未连接"}
+          <span className={`chip mt5-conn ${mt5Live ? "ok" : "bad"}`}>
+            {mt5Live ? "MT5 直连" : "MT5 未连接"}
           </span>
 
           <button
             type="button"
             className={`tool-btn ${dailyHardRiskOpen ? "tool-btn-accent" : ""}`}
-            onClick={() => setDailyHardRiskOpen((o) => !o)}
-            title="侧栏展开十条硬风控箴言"
+            onClick={() => setDailyHardRiskOpen(true)}
+            title="打开十条硬风控箴言"
           >
             每日必读
           </button>
@@ -1373,7 +1586,7 @@ export default function App() {
 
       <ChartToolbars
         timeframe={timeframe}
-        timeframes={TIMEFRAMES}
+        timeframes={ALL_TIMEFRAMES}
         onTimeframe={onTimeframe}
         onResetView={() => chartRef.current?.resetVisibleRange()}
         onRefresh={refreshMock}
@@ -1402,6 +1615,8 @@ export default function App() {
 
       <RiskPanel open={riskOpen} onClose={() => setRiskOpen(false)} account={account} />
 
+      <DailyHardRiskModal open={dailyHardRiskOpen} onClose={() => setDailyHardRiskOpen(false)} />
+
       <StreakOrdinanceModal
         open={streakOrdinanceAlert.open}
         tier={streakOrdinanceAlert.tier}
@@ -1410,20 +1625,48 @@ export default function App() {
         onClose={streakOrdinanceAlert.dismiss}
       />
 
+      {!mt5Live && mt5ConnectHintOpen ? (
+        <div
+          className="mt5-connect-overlay"
+          role="presentation"
+          onClick={() => setMt5ConnectHintOpen(false)}
+        >
+          <div
+            className="mt5-connect-modal"
+            role="dialog"
+            aria-labelledby="mt5-connect-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button
+              type="button"
+              className="modal-close mt5-connect-close"
+              aria-label="关闭"
+              onClick={() => setMt5ConnectHintOpen(false)}
+            >
+              ✕
+            </button>
+            <Mt5ConnectBanner
+              error={accountError}
+              onRetry={() => void reloadAccount()}
+            />
+          </div>
+        </div>
+      ) : null}
+
       <div className="main-grid">
 
         <div className="chart-pane">
 
-          {market.loadingTf ? <div className="chart-loading">加载 {timeframe} …</div> : null}
+          {market.loadingTf && candles.length === 0 ? (
+            <div className="chart-loading">加载 {timeframe} …</div>
+          ) : null}
 
-          {!account ? (
-            <Mt5ConnectBanner error={accountError} onRetry={() => void reloadAccount()} />
-          ) : accountError ? (
+          {accountError && !account ? (
             <div className="chart-error" title={accountError}>
               账户接口：{accountError.slice(0, 120)}
             </div>
           ) : null}
-          {market.error && market.source !== "mt5" && !accountError ? (
+          {market.error && !account && market.source !== "mt5" ? (
             <div className="chart-error" title={market.error}>
               MT5 未就绪：{market.error.slice(0, 80)}
             </div>
@@ -1483,12 +1726,13 @@ export default function App() {
           </div>
 
           <TradingChart
-
+            key={tradeInstrument}
             ref={chartRef}
 
             candles={candles}
 
             timeframe={timeframe}
+            instrumentId={tradeInstrument}
 
             overlays={overlays}
             markPrice={market.bid ?? lastPrice}
@@ -1554,14 +1798,26 @@ export default function App() {
 
           <div className="risk-strip">
 
-            <h2>风控 · ARM</h2>
+            <h2 className="risk-strip-title">
+              <span>风控 · ARM</span>
+              {account ? (
+                <span className="risk-strip-acct" title="账户净值与当日盈亏（相对日风控基准）">
+                  净值 {account.equity.toFixed(2)} {account.currency} · 余额 {account.balance.toFixed(2)}
+                  {dailyPnlUsd != null ? (
+                    <>
+                      {" "}
+                      · 当日盈亏：
+                      <span className={dailyPnlUsd >= 0 ? "risk-strip-pnl up" : "risk-strip-pnl down"}>
+                        {dailyPnlUsd >= 0 ? "+" : ""}
+                        {dailyPnlUsd.toFixed(1)} {account.currency}
+                      </span>
+                    </>
+                  ) : null}
+                </span>
+              ) : null}
+            </h2>
 
             <RiskHud status={riskStatus} onOpenRisk={() => setRiskOpen(true)} />
-
-            <DailyHardRiskPanel
-              expanded={dailyHardRiskOpen}
-              onToggle={() => setDailyHardRiskOpen((o) => !o)}
-            />
 
             <div className="arm-row">
 
@@ -1603,17 +1859,13 @@ export default function App() {
 
             </div>
 
-            <p className="arm-hint">
-
-              {riskStatus?.halted
-                ? riskStatus.halt_kind === "streak"
+            {riskStatus?.halted ? (
+              <p className="arm-hint">
+                {riskStatus.halt_kind === "streak"
                   ? "连续止损已触发，已强制 DISARM；见上方冷却倒计时。"
-                  : "日损触顶，已强制 DISARM；见上方倒计时。"
-                : armState === "armed"
-                  ? "B/S 市价 · X 平仓（选中优先，否则最近开仓）· L 图形挂单 · 1/2/3 手数。"
-                  : "Space 或 ARM 解锁后再下单。"}
-
-            </p>
+                  : "日损触顶，已强制 DISARM；见上方倒计时。"}
+              </p>
+            ) : null}
 
           </div>
 
@@ -1623,7 +1875,7 @@ export default function App() {
             bid={market.bid}
             ask={market.ask}
             form={form}
-            mt5Connected={executeOnMt5 && market.connected}
+            mt5Connected={mt5Live}
             tradingLocked={!!riskStatus?.halted}
             onFormChange={(patch) => setForm((f) => ({ ...f, ...patch }))}
             onSubmit={(side) => void submitOrder(side)}

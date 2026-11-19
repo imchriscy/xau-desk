@@ -17,43 +17,35 @@ function mapRow(r: Awaited<ReturnType<typeof fetchMt5Positions>>[number]): Posit
   };
 }
 
-export function useMt5PositionsSync(
-  enabled: boolean,
-  symbol: string | undefined,
-  tick: number,
-  accountMargin?: number,
-) {
+/** 只上报非空持仓；空响应不覆盖，避免网关/snapshot 竞态导致 UI 闪空 */
+export function useMt5PositionsSync(enabled: boolean, symbol: string | undefined, tick: number) {
   const [positions, setPositions] = useState<Position[]>([]);
 
   useEffect(() => {
     if (!enabled) {
-      setPositions([]);
       return;
     }
     let cancelled = false;
-    let failStreak = 0;
     const load = async () => {
       try {
-        let rows = await fetchMt5Positions(symbol || undefined);
-        if (accountMargin != null && accountMargin <= 1.5 && rows.length > 0) {
-          rows = [];
-        }
-        if (!cancelled) {
-          failStreak = 0;
-          setPositions(rows.map(mapRow));
-        }
+        const rows = await fetchMt5Positions(symbol || undefined, { snapshot: false });
+        if (cancelled || rows.length === 0) return;
+        setPositions((prev) => {
+          const map = new Map(prev.map((p) => [p.ticket, p]));
+          for (const r of rows) map.set(r.ticket, mapRow(r));
+          return [...map.values()];
+        });
       } catch {
-        failStreak += 1;
-        if (!cancelled && failStreak >= 2) setPositions([]);
+        /* 保留上一轮 */
       }
     };
     void load();
-    const id = window.setInterval(() => void load(), 80);
+    const id = window.setInterval(() => void load(), 120);
     return () => {
       cancelled = true;
       clearInterval(id);
     };
-  }, [enabled, symbol, tick, accountMargin]);
+  }, [enabled, symbol, tick]);
 
   return positions;
 }

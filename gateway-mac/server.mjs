@@ -116,14 +116,9 @@ function formatEaOfflineDetail(st) {
   );
 }
 
-/** Wine 终端常滞后写 positions[]；保证金已释放时按空仓返回（手机/外部平仓） */
-function reconcilePositionsWithMargin(st, positions) {
-  const rows = Array.isArray(positions) ? positions : [];
-  if (rows.length === 0) return rows;
-  const margin = Number(st?.account?.margin);
-  if (!Number.isFinite(margin)) return rows;
-  if (margin <= 1.5) return [];
-  return rows;
+/** 曾用 margin≤1.5 清 ghost；开仓时 margin 滞后会导致误删闪屏，现原样返回 EA/state 列表 */
+function reconcilePositionsWithMargin(_st, positions) {
+  return Array.isArray(positions) ? positions : [];
 }
 
 function requireEa(res) {
@@ -289,22 +284,24 @@ const server = http.createServer(async (req, res) => {
       const login = Number(st.account?.login ?? 0);
       const symbol = url.searchParams.get("symbol");
       let positions = st.positions || [];
-      positions = reconcilePositionsWithMargin(st, positions);
       let liveSnap = false;
-      try {
-        const live = await Promise.race([
-          fetchLiveSnapshot(),
-          new Promise((resolve) => setTimeout(() => resolve(null), 600)),
-        ]);
-        if (live?.positions) {
-          positions = live.positions;
-          liveSnap = true;
-          if (live.account) {
-            st = { ...st, account: { ...st.account, ...live.account } };
+      const wantSnapshot = url.searchParams.get("snapshot") !== "0";
+      if (wantSnapshot) {
+        try {
+          const live = await Promise.race([
+            fetchLiveSnapshot(),
+            new Promise((resolve) => setTimeout(() => resolve(null), 600)),
+          ]);
+          if (live?.positions) {
+            positions = live.positions;
+            liveSnap = true;
+            if (live.account) {
+              st = { ...st, account: { ...st.account, ...live.account } };
+            }
           }
+        } catch {
+          /* 用 state 列表 */
         }
-      } catch {
-        /* 用已 reconcile 的 state 列表 */
       }
       positions = reconcilePositionsWithMargin(st, positions);
       watchPositionsForStreak(login, positions);
@@ -458,13 +455,22 @@ const server = http.createServer(async (req, res) => {
                 }
               : undefined;
           const latencyPayload = lat ? { latency: { ...lat, summary } } : {};
-          json(
-            res,
-            code,
-            ack.ok
-              ? { ok: true, ...(ack.result || {}), ...latencyPayload }
-              : { detail: ack.error || "下单失败", ...latencyPayload },
-          );
+          if (ack.ok) {
+            const r = ack.result && typeof ack.result === "object" ? ack.result : {};
+            const ticket = r.ticket ?? r.position_ticket ?? r.order;
+            json(res, code, {
+              ok: true,
+              ticket,
+              price: r.price,
+              side: r.side,
+              lots: r.lots,
+              symbol: r.symbol || symbol,
+              ...r,
+              ...latencyPayload,
+            });
+          } else {
+            json(res, code, { detail: ack.error || "下单失败", ...latencyPayload });
+          }
         }
         return;
       }

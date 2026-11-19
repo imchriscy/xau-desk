@@ -30,7 +30,7 @@ export default function Mt5ConnectBanner({ error, onRetry }: Props) {
 
   return (
     <div className="mt5-connect-banner" role="status">
-      <h3>只需两步</h3>
+      <h3 id="mt5-connect-title">只需两步</h3>
       <ol>
         <li>打开 MetaTrader 5 并登录账户。</li>
         <li>

@@ -11,6 +11,8 @@ import { brokerSessionKey } from "../lib/goldSymbol";
 const POLL_MS = 800;
 const STALE_MS = 25_000;
 const RESCAN_WHEN_OFFLINE_MS = 5_000;
+/** 网关忙（连单 rpc）时 status 可能瞬断，勿立刻清 account */
+const ACCOUNT_STICKY_MS = 12_000;
 
 export function useMt5Account(
   refreshKey = 0,
@@ -24,8 +26,21 @@ export function useMt5Account(
     bridge_dir?: string;
   } | null>(null);
   const prevSessionRef = useRef<string | null>(null);
+  const prevLoginRef = useRef<number | null>(null);
   const fingerprintRef = useRef<string | null>(null);
   const lastAutoAttachAt = useRef(0);
+  const lastGoodAccountRef = useRef<Mt5AccountSnapshot | null>(null);
+  const lastGoodAtRef = useRef(0);
+
+  const stickyRestore = useCallback((_warn?: string) => {
+    const age = Date.now() - lastGoodAtRef.current;
+    if (lastGoodAccountRef.current && age < ACCOUNT_STICKY_MS) {
+      setAccount(lastGoodAccountRef.current);
+      setError(null);
+      return true;
+    }
+    return false;
+  }, []);
 
   const reload = useCallback(async () => {
     try {
@@ -37,11 +52,12 @@ export function useMt5Account(
       });
 
       if (status.connected && status.bridge_ver_ok === false) {
-        setAccount(null);
-        setError(
+        const verMsg =
           `MT5 EA 版本过旧（${status.bridge_ver ?? "?"}，需要 ≥ ${status.bridge_ver_required ?? "1.023"}）。` +
-            "请在终端运行：bash scripts/upgrade-mt5-bridge-mac.sh，或设置里「立即刷新 MT5 连接」。",
-        );
+          "请在终端运行：bash scripts/upgrade-mt5-bridge-mac.sh，或设置里「立即刷新 MT5 连接」。";
+        if (stickyRestore(verMsg)) return;
+        setAccount(null);
+        setError(verMsg);
         return;
       }
 
@@ -51,9 +67,11 @@ export function useMt5Account(
           age != null && age > STALE_MS
             ? `MT5 桥接未刷新（${Math.round(age / 1000)}s，与休市无关）：请确认算法交易为绿色，或在设置里点「修复 MT5 连接」`
             : status.error ?? "MT5 未连接：请打开 MT5 并开启算法交易";
+        if (stickyRestore(staleMsg)) return;
         setAccount(null);
         setError(staleMsg);
         prevSessionRef.current = null;
+        prevLoginRef.current = null;
         fingerprintRef.current = null;
         const shortGap = status.stale_login != null && age != null && age < 180_000;
         const attachCooldownMs = 120_000;
@@ -72,22 +90,15 @@ export function useMt5Account(
       const session = brokerSessionKey(a.login, a.server);
       const fingerprint = `${session}|${a.balance.toFixed(2)}|${a.equity.toFixed(2)}`;
 
-      if (
-        session &&
-        prevSessionRef.current != null &&
-        prevSessionRef.current !== session
-      ) {
+      if (prevLoginRef.current != null && a.login !== prevLoginRef.current) {
         onSessionChange?.(session, prevSessionRef.current);
-      } else if (fingerprintRef.current != null && fingerprintRef.current !== fingerprint && session) {
-        const prevKey = fingerprintRef.current.split("|")[0] || null;
-        if (prevKey && prevKey !== session) {
-          onSessionChange?.(session, prevKey);
-        }
       }
-
+      prevLoginRef.current = a.login;
       if (session) prevSessionRef.current = session;
       fingerprintRef.current = fingerprint;
 
+      lastGoodAccountRef.current = a;
+      lastGoodAtRef.current = Date.now();
       setAccount(a);
       setError(null);
     } catch (e) {
@@ -95,11 +106,13 @@ export function useMt5Account(
       if (msg.includes("not found") || msg.includes("404")) {
         msg = "网关 404：请运行 restart-backend.cmd（需版本 0.3-risk-chart，含 /api/account/detect）";
       }
+      if (stickyRestore(msg)) return;
       setAccount(null);
       setError(msg);
       prevSessionRef.current = null;
+      prevLoginRef.current = null;
     }
-  }, [onSessionChange]);
+  }, [onSessionChange, stickyRestore]);
 
   useEffect(() => {
     void reload();

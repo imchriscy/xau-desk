@@ -1,22 +1,31 @@
 import { HARD_RISK_ORDINANCE, SIN_POISON_LABEL, type SinPoison } from "../data/hardRiskOrdinance";
 
 interface Props {
-  expanded: boolean;
-  onToggle: () => void;
+  open: boolean;
+  onClose: () => void;
 }
 
 function SinBadge({ sin }: { sin: SinPoison }) {
   return <span className={`hard-sin-badge sin-${sin}`}>{SIN_POISON_LABEL[sin]}</span>;
 }
 
-export default function DailyHardRiskPanel({ expanded, onToggle }: Props) {
+export default function DailyHardRiskModal({ open, onClose }: Props) {
+  if (!open) return null;
+
   return (
-    <div className="daily-hard-risk-panel">
-      <button type="button" className="daily-hard-risk-toggle" onClick={onToggle} aria-expanded={expanded}>
-        <span className="daily-hard-risk-toggle-label">每日必读 · 硬风控</span>
-        <span className="daily-hard-risk-toggle-meta">{expanded ? "▾ 收起" : "▸ 十条箴言"}</span>
-      </button>
-      {expanded ? (
+    <div className="modal-backdrop" role="presentation" onClick={onClose}>
+      <div
+        className="modal-panel modal-panel-wide daily-hard-risk-modal"
+        role="dialog"
+        aria-labelledby="daily-hard-risk-title"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <header className="modal-head">
+          <h2 id="daily-hard-risk-title">每日必读 · 硬风控十条</h2>
+          <button type="button" className="modal-close" onClick={onClose} aria-label="关闭">
+            ×
+          </button>
+        </header>
         <div className="daily-hard-risk-body">
           <p className="daily-hard-risk-hint">外览四字 · 点卡片展开细则 · 触即德破</p>
           <div className="daily-hard-risk-cards">
@@ -40,7 +49,7 @@ export default function DailyHardRiskPanel({ expanded, onToggle }: Props) {
             ))}
           </div>
         </div>
-      ) : null}
+      </div>
     </div>
   );
 }

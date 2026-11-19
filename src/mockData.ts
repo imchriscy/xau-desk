@@ -1,5 +1,16 @@
 import type { Candle, Timeframe } from "./types";
 
+export const ALL_TIMEFRAMES: Timeframe[] = [
+  "1m",
+  "3m",
+  "5m",
+  "15m",
+  "30m",
+  "1h",
+  "4h",
+  "1d",
+];
+
 const TF_SECONDS: Record<Timeframe, number> = {
   "1m": 60,
   "3m": 180,

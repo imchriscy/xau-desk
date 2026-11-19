@@ -66,7 +66,7 @@ export default function StreakOrdinanceModal({
             </div>
           ))}
         </div>
-        <p className="streak-ordinance-footer">完整十条见侧栏「每日必读 · 硬风控」。</p>
+        <p className="streak-ordinance-footer">完整十条见顶栏「每日必读」。</p>
         <div className="streak-ordinance-actions">
           <button type="button" className="tool-btn streak-ordinance-dismiss" onClick={onClose}>
             我已阅读 · 关闭

@@ -187,18 +187,20 @@ export async function fetchAccount(): Promise<Mt5AccountSnapshot> {
   return res.json();
 }
 
-export async function fetchMt5Positions(symbol?: string): Promise<Mt5PositionRow[]> {
-  const q = symbol ? `?symbol=${encodeURIComponent(symbol)}` : "";
+export async function fetchMt5Positions(
+  symbol?: string,
+  opts?: { snapshot?: boolean },
+): Promise<Mt5PositionRow[]> {
+  const params = new URLSearchParams();
+  if (symbol) params.set("symbol", symbol);
+  if (opts?.snapshot === false) params.set("snapshot", "0");
+  const q = params.size ? `?${params.toString()}` : "";
   const res = await fetch(`${BASE}/positions${q}`);
   if (!res.ok) throw new Error(await res.text());
   const body = (await res.json()) as {
     positions: Mt5PositionRow[];
     account_margin?: number | null;
   };
-  const margin = body.account_margin;
-  if (margin != null && margin <= 1.5 && body.positions.length > 0) {
-    return [];
-  }
   return body.positions;
 }
 
@@ -322,6 +324,24 @@ export type OrderLatencySummary = {
   gw_polls?: number;
 };
 
+/** 市价单 HTTP 体里 ticket 字段名/嵌套不一；统一成持仓 ticket */
+export function normalizeMarketTicket(raw: Record<string, unknown>): number | undefined {
+  const nested =
+    raw.result && typeof raw.result === "object" && raw.result !== null
+      ? (raw.result as Record<string, unknown>)
+      : null;
+  const pick =
+    raw.ticket ??
+    raw.position_ticket ??
+    raw.order ??
+    nested?.ticket ??
+    nested?.position_ticket ??
+    nested?.order;
+  if (pick == null) return undefined;
+  const n = typeof pick === "string" ? Number.parseInt(pick, 10) : Number(pick);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
 export async function sendMarketOrder(
   body: {
     side: "buy" | "sell";
@@ -339,6 +359,7 @@ export async function sendMarketOrder(
   price?: number;
   side?: "buy" | "sell";
   lots?: number;
+  symbol?: string;
   latency?: { summary?: OrderLatencySummary };
 }> {
   const res = await fetch(`${BASE}/order/market`, {
@@ -346,25 +367,26 @@ export async function sendMarketOrder(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   });
-  const data = (await res.json()) as {
-    ok?: boolean;
+  const data = (await res.json()) as Record<string, unknown> & {
     detail?: string;
     mt5_ms?: number;
-    ticket?: number;
     price?: number;
     side?: "buy" | "sell";
     lots?: number;
+    symbol?: string;
     latency?: { summary?: OrderLatencySummary };
   };
-  if (!res.ok) throw new Error(data.detail ?? "下单失败");
+  if (!res.ok) throw new Error((data.detail as string) ?? "下单失败");
+  const ticket = normalizeMarketTicket(data);
   return {
     ok: !!data.ok,
-    mt5_ms: data.mt5_ms,
+    mt5_ms: data.mt5_ms as number | undefined,
     detail: data.detail,
-    ticket: data.ticket,
-    price: data.price,
-    side: data.side,
-    lots: data.lots,
+    ticket,
+    price: typeof data.price === "number" ? data.price : Number(data.price) || undefined,
+    side: data.side === "sell" ? "sell" : data.side === "buy" ? "buy" : undefined,
+    lots: typeof data.lots === "number" ? data.lots : Number(data.lots) || undefined,
+    symbol: typeof data.symbol === "string" ? data.symbol : undefined,
     latency: data.latency,
   };
 }

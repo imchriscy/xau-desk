@@ -76,3 +76,31 @@ export function instrumentById(id: string): TradeInstrument {
 export function formatPrice(price: number, instrumentId: TradeInstrumentId): string {
   return price.toFixed(instrumentById(instrumentId).digits);
 }
+
+const normSym = (s: string) => s.toUpperCase().replace(/[^A-Z0-9]/g, "");
+
+/** 判断网关返回的 symbol 是否属于当前交易品种（过滤切换品种后的滞后报价） */
+export function symbolMatchesInstrument(quoteSymbol: string, instrumentId: TradeInstrumentId): boolean {
+  const q = normSym(quoteSymbol);
+  if (!q) return false;
+  const inst = instrumentById(instrumentId);
+  return inst.candidates.some((c) => {
+    const n = normSym(c);
+    return q === n || q.includes(n) || n.includes(q);
+  });
+}
+
+export function symbolsLooselyEqual(a: string, b: string): boolean {
+  const na = normSym(a);
+  const nb = normSym(b);
+  return na === nb || na.includes(nb) || nb.includes(na);
+}
+
+/** 粗判 K 线收盘价是否像该品种（防跨品种污染缓存） */
+export function lastClosePlausibleForInstrument(instrumentId: TradeInstrumentId, close: number): boolean {
+  if (!Number.isFinite(close) || close <= 0) return false;
+  if (instrumentId === "xau") return close >= 800 && close <= 8_000;
+  if (instrumentId === "nas100") return close >= 8_000 && close <= 80_000;
+  if (instrumentId === "btc") return close >= 3_000 && close <= 500_000;
+  return true;
+}

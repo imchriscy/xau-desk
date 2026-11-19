@@ -64,7 +64,7 @@
 .chart-indicator-legend {
   position: absolute;
   left: 10px;
-  bottom: 36px;
+  top: 72px;
   z-index: 12;
   min-width: 148px;
   max-width: min(260px, 42vw);

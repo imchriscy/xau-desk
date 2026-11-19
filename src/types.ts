@@ -1,3 +1,5 @@
+import type { TradeInstrumentId } from "./instruments";
+
 export type Timeframe = "1m" | "3m" | "5m" | "15m" | "30m" | "1h" | "4h" | "1d";
 
 export interface Candle {
@@ -60,6 +62,8 @@ export interface Position {
   /** MT5 浮动盈亏；演示仓由前端按现价估算 */
   profitUsd?: number;
   symbol?: string;
+  /** 下单/ bootstrap 时锁定，避免轮询改 symbol 导致图表品种过滤闪没 */
+  instrumentId?: TradeInstrumentId;
 }
 
 export interface PendingOrder {
